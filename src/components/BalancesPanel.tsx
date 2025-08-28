@@ -1,9 +1,10 @@
+// src/components/BalancesPanel.tsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { ArrowRight, Check } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts'
 
-type BalanceRow = { group_id: string; user_id: string; net_cents: number; name?: string }
+type BalanceRow = { group_id: string; user_id: string; net_cents: number }
 type Profile = { id: string; email: string|null; display_name: string|null }
 
 export function BalancesPanel({ groupId }:{ groupId: string }) {
@@ -18,28 +19,46 @@ export function BalancesPanel({ groupId }:{ groupId: string }) {
     if (ids.length) {
       const { data: p } = await supabase.from('profiles').select('*').in('id', ids)
       const map: Record<string, Profile> = {}
-      ;(p||[]).forEach(pr => map[pr.id] = pr)
+      ;(p||[]).forEach(pr => { if (pr && pr.id) map[pr.id] = pr as Profile })
       setProfiles(map)
+    } else {
+      setProfiles({})
     }
   }
+
   useEffect(()=>{ load() }, [groupId])
 
-  const chartData = useMemo(() => rows.map(r => ({ name: display(profiles[r.user_id]), value: Math.round(r.net_cents/100) })), [rows, profiles])
+  const chartData = useMemo(
+    () => rows.map(r => ({
+      name: display(profiles[r.user_id as string] /* יכול להיות undefined וזה בסדר לפונקציה */),
+      value: Math.round((r.net_cents || 0)/100),
+    })),
+    [rows, profiles]
+  )
 
-  // Greedy settlement suggestions
+  // אלגוריתם חמדן לסגירת חוב
   const suggestions = useMemo(() => {
-    const debtors = rows.filter(r => r.net_cents < 0).map(r => ({ id: r.user_id, amt: -r.net_cents }))
-    const creditors = rows.filter(r => r.net_cents > 0).map(r => ({ id: r.user_id, amt: r.net_cents }))
-    debtors.sort((a,b)=>b.amt-a.amt) // largest debtor first
-    creditors.sort((a,b)=>b.amt-a.amt) // largest creditor first
+    const debtors = rows
+      .filter(r => (r.net_cents || 0) < 0)
+      .map(r => ({ id: r.user_id, amt: -(r.net_cents || 0) }))
+    const creditors = rows
+      .filter(r => (r.net_cents || 0) > 0)
+      .map(r => ({ id: r.user_id, amt: (r.net_cents || 0) }))
+
+    debtors.sort((a,b)=>b.amt-a.amt)
+    creditors.sort((a,b)=>b.amt-a.amt)
+
     const acts: { from: string; to: string; cents: number }[] = []
-    let i=0,j=0
+    let i=0, j=0
     while (i<debtors.length && j<creditors.length) {
-      const take = Math.min(debtors[i].amt, creditors[j].amt)
-      acts.push({ from: debtors[i].id, to: creditors[j].id, cents: Math.round(take) })
-      debtors[i].amt -= take; creditors[j].amt -= take
-      if (debtors[i].amt <= 1) i++
-      if (creditors[j].amt <= 1) j++
+      const d = debtors[i]!   // non-null assertion: בטוח קיים כי בדקנו בתנאי ה-while
+      const c = creditors[j]!
+      const take = Math.min(d.amt, c.amt)
+      acts.push({ from: d.id, to: c.id, cents: Math.round(take) })
+      d.amt -= take
+      c.amt -= take
+      if (d.amt <= 1) i++
+      if (c.amt <= 1) j++
     }
     return acts
   }, [rows])
@@ -51,7 +70,7 @@ export function BalancesPanel({ groupId }:{ groupId: string }) {
 
   return (
     <div className='px-4 py-4 space-y-4'>
-      <div className='bg-white rounded-2xl shadow p-3'>
+      <div className='bg-white dark:bg-slate-800 rounded-2xl shadow p-3'>
         <h3 className='font-semibold mb-2'>מאזן לכל משתמש (₪)</h3>
         <div className='h-48'>
           <ResponsiveContainer width='100%' height='100%'>
@@ -65,7 +84,7 @@ export function BalancesPanel({ groupId }:{ groupId: string }) {
         </div>
       </div>
 
-      <div className='bg-white rounded-2xl shadow p-3'>
+      <div className='bg-white dark:bg-slate-800 rounded-2xl shadow p-3'>
         <h3 className='font-semibold mb-3'>הצעות לסגירת חשבון</h3>
         {suggestions.length === 0 ? (
           <p className='text-gray-500 text-sm'>אין חובות פתוחים.</p>
