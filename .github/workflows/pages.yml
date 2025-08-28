@@ -22,8 +22,12 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-      - run: npm ci || npm i
-      - run: npm run build
+      - run: npm ci || npm install
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
