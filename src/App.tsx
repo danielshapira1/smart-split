@@ -199,6 +199,28 @@ function AuthScreen() {
     if (error) setError(error.message)
   }
 
+  // הפונקציה להתחברות עם Google:
+const handleGoogleLogin = async () => {
+  const base = import.meta.env.BASE_URL || '/'
+  const redirectTo = `${window.location.origin}${base}`
+
+  await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo },
+  })
+}
+
+// הפונקציה לשליחת Magic Link במייל:
+const handleEmailMagicLink = async (email: string) => {
+  const base = import.meta.env.BASE_URL || '/'
+  const redirectTo = `${window.location.origin}${base}`
+
+  await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo },
+  })
+}
+
   return (
     <div className='h-full max-w-sm mx-auto flex flex-col items-center justify-center p-4'>
       <h1 className='text-2xl font-bold mb-2'>הוצאות ביחד</h1>
