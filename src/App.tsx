@@ -105,25 +105,61 @@ export default function App() {
 
   const signOut = async () => { await supabase.auth.signOut() }
 
-  if (!session) return <AuthScreen />
+  // --- אין קבוצה: הצג כפתור ליצירת קבוצה חדשה ---
+  if (session && !group) return (
+    <div className='h-full flex flex-col items-center justify-center text-gray-600 p-4'>
+      <p className='mb-4 text-center'>אין קבוצה עדיין — צור קבוצה חדשה מהתפריט או בלחיצה כאן:</p>
+      <button
+        onClick={async () => {
+          const name = prompt("שם הקבוצה החדשה:")
+          if (!name || !session) return
+          const { data, error } = await supabase
+            .from('groups')
+            .insert({ name })
+            .select()
+            .single()
 
-  if (!group) return (
-    <div className='h-full flex items-center justify-center text-gray-600'>
-      אין קבוצה עדיין — צור קבוצה חדשה מהתפריט.
+          if (error) {
+            alert("שגיאה ביצירת קבוצה: " + error.message)
+          } else if (data) {
+            await supabase.from('memberships').insert({
+              group_id: data.id,
+              user_id: session.user.id,
+              role: 'owner',
+            })
+            setGroups([data])
+            setGroup(data)
+            setRole('owner')
+          }
+        }}
+        className='px-4 py-2 bg-black text-white rounded-full shadow active:scale-[.98]'
+      >
+        צור קבוצה חדשה
+      </button>
+      <button
+        onClick={signOut}
+        className='mt-6 text-sm text-red-600'
+      >
+        יציאה
+      </button>
     </div>
   )
 
+  // --- לא מחובר: מסך התחברות ---
+  if (!session) return <AuthScreen />
+
+  // --- מסך ראשי ---
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
           groups={groups}
-          current={group}
+          current={group!}
           onSelect={setGroup}
           onCreated={g => { setGroups(prev => [g, ...prev]); setGroup(g); }}
         />
         <div className='flex-1' />
-        <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
+        <InviteButton groupId={group!.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
         </button>
@@ -185,7 +221,7 @@ export default function App() {
           )}
         </main>
       ) : (
-        <BalancesPanel groupId={group.id} />
+        <BalancesPanel groupId={group!.id} />
       )}
 
       {tab==='expenses' && (
@@ -206,7 +242,7 @@ export default function App() {
 
       {showForm && (
         <ExpenseForm
-          groupId={group.id}
+          groupId={group!.id}
           onClose={() => { setShowForm(false); refresh(); }}
           categories={CATEGORIES}
         />
