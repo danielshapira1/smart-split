@@ -1,122 +1,199 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { X } from 'lucide-react'
 
-type Props = {
+export type ExpenseFormProps = {
   groupId: string
-  onClose: () => void
+  currentPayerName: string
   categories: string[]
+  onClose: () => void
+  onSaved: () => void
 }
 
-export function ExpenseForm({ groupId, onClose, categories }: Props) {
-  const [description, setDescription] = useState('')
-  const [amountStr, setAmountStr] = useState('')      // שקל חדש כטקסט
-  const [category, setCategory] = useState<string>(categories[0] ?? 'אחר')
-  const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10))
+type Session = import('@supabase/supabase-js').Session
+
+export const ExpenseForm: React.FC<ExpenseFormProps> = ({
+  groupId,
+  currentPayerName,
+  categories,
+  onClose,
+  onSaved,
+}) => {
+  const [session, setSession] = useState<Session | null>(null)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  // מונע תווים לא מספריים (מאפשר נקודה או פסיק עשרונית אחת)
-  const onAmountChange = (v: string) => {
-    const sanitized = v
-      .replace(/[^\d.,]/g, '')       // רק ספרות, נקודה, פסיק
-      .replace(',', '.')             // פסיק לנקודה
-    // לאפשר לכל היותר נקודה אחת
-    const parts = sanitized.split('.')
-    const fixed = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized
-    setAmountStr(fixed)
-  }
+  // שדות טופס
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<string>(categories[0] ?? 'אחר')
+  const [amount, setAmount] = useState<string>('') // בשקלים כתו
+  const [occurredOn, setOccurredOn] = useState<string>(() => {
+    const d = new Date()
+    // yyyy-mm-dd
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate(),
+    ).padStart(2, '0')}`
+  })
 
-  const submit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+  }, [])
+
+  const amountCents = useMemo(() => {
+    // המרה לבטוח: ריקים -> NaN -> 0
+    const n = Number.parseFloat(amount.replace(',', '.'))
+    if (!Number.isFinite(n) || n <= 0) return 0
+    return Math.round(n * 100)
+  }, [amount])
+
+  const canSave = useMemo(() => {
+    return !!session?.user?.id && !!groupId && amountCents > 0 && !!category && !!occurredOn
+  }, [session, groupId, amountCents, category, occurredOn])
+
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError(null)
-
-    // המרה לאגורות
-    const shekels = Number(amountStr.replace(',', '.'))
-    if (Number.isNaN(shekels) || shekels <= 0) {
-      setError('סכום לא תקין')
+    if (!session?.user?.id) {
+      alert('לא נמצא משתמש מחובר')
       return
     }
-    const amount_cents = Math.round(shekels * 100)
+    if (!canSave) return
 
     setSaving(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('לא מחובר')
-
-      const { error } = await supabase.from('expenses').insert({
+      const payload = {
         group_id: groupId,
-        user_id: user.id,
-        amount_cents,
+        user_id: session.user.id,
+        amount_cents: amountCents,
         currency: 'ILS',
-        description: description.trim(),
+        description: description?.trim() || null,
         category,
-        occurred_on: date,         // חשוב: העמודה נקראת occurred_on
-      })
+        occurred_on: occurredOn,
+        payer_name: currentPayerName || null,
+      }
 
-      if (error) throw error
+      const { error } = await supabase.from('expenses').insert(payload)
+      if (error) {
+        console.error('insert expense failed:', error)
+        alert(error.message)
+        setSaving(false)
+        return
+      }
 
-      onClose()
+      // איפוס שדות (רק אם תרצה להשאיר פתוח)
+      // setDescription('')
+      // setCategory(categories[0] ?? 'אחר')
+      // setAmount('')
+      // setOccurredOn(new Date().toISOString().slice(0, 10))
+
+      setSaving(false)
+      onSaved()
     } catch (err: any) {
-      setError(err.message ?? 'שמירה נכשלה')
-    } finally {
+      console.error(err)
+      alert('שמירה נכשלה')
       setSaving(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-sm rounded-2xl shadow p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">הוספת הוצאה</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-black">×</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-lg">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-bold">הוספת הוצאה</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 hover:bg-slate-100 active:scale-95"
+            aria-label="סגור"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <form onSubmit={submit} className="space-y-3">
-          <input
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="תיאור"
-            className="w-full rounded-xl border px-3 py-3 outline-none focus:ring-2 focus:ring-black"
-          />
-
+        <form className="space-y-3" onSubmit={onSubmit}>
+          {/* תיאור */}
           <div>
-            <label className="block text-sm mb-1">סכום (₪)</label>
+            <label className="block text-sm text-gray-600 mb-1">תיאור</label>
             <input
-              type="text"
-              inputMode="decimal"
-              pattern="^\d*([.,]\d{0,2})?$"
-              placeholder="0.00"
-              value={amountStr}
-              onChange={(e) => onAmountChange(e.target.value)}
-              className="w-full rounded-xl border px-3 py-3 outline-none focus:ring-2 focus:ring-black"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="מה קנית?"
+              className="w-full rounded-xl border px-3 py-2 outline-none focus:ring-2 focus:ring-black"
+              maxLength={120}
             />
           </div>
 
-          <div className="flex gap-2">
+          {/* קטגוריה */}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">קטגוריה</label>
             <select
               value={category}
-              onChange={e => setCategory(e.target.value)}
-              className="flex-1 rounded-xl border px-3 py-3 outline-none"
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2 outline-none"
             >
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
+          </div>
 
+          {/* סכום */}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">סכום (₪)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2 outline-none focus:ring-2 focus:ring-black"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">מספרים בלבד. נקודה עשרונית מותרת.</p>
+          </div>
+
+          {/* תאריך */}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">תאריך</label>
             <input
               type="date"
-              value={date}
-              onChange={e => setDate(e.target.value)}
-              className="w-[52%] rounded-xl border px-3 py-3 outline-none"
+              value={occurredOn}
+              onChange={(e) => setOccurredOn(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2 outline-none focus:ring-2 focus:ring-black"
+              required
             />
           </div>
 
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+          {/* מי שילם (תצוגה בלבד, שומר כ-payer_name) */}
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">שולם ע"י</label>
+            <input
+              value={currentPayerName}
+              readOnly
+              className="w-full rounded-xl border px-3 py-2 bg-slate-50 text-gray-600"
+            />
+          </div>
 
-          <button
-            disabled={saving}
-            className="w-full rounded-xl bg-black text-white py-3 font-medium active:scale-[.99] disabled:opacity-60"
-          >
-            {saving ? 'שומר…' : 'שמור הוצאה'}
-          </button>
+          {/* כפתורים */}
+          <div className="pt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-xl border px-3 py-3 active:scale-95"
+              disabled={saving}
+            >
+              בטל
+            </button>
+            <button
+              type="submit"
+              disabled={!canSave || saving}
+              className="flex-1 rounded-xl bg-black text-white px-3 py-3 active:scale-95 disabled:opacity-60"
+            >
+              {saving ? 'שומר…' : 'שמור הוצאה'}
+            </button>
+          </div>
         </form>
       </div>
     </div>
