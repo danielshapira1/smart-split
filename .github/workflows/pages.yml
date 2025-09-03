@@ -22,15 +22,18 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-      - run: npm ci || npm install
+
+      - run: npm ci
       - name: Build
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{https://huajawlbpipdgseooppm.supabase.co}}
-          VITE_SUPABASE_ANON_KEY: ${{eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1YWphd2xicGlwZGdzZW9vcHBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzOTUzNjcsImV4cCI6MjA3MTk3MTM2N30.2ho1KLVt5a-BiXH-4ku0XR6ZRjgUO-M0pXiwc_7r2Ko}}
+          # שמות ה-ENV ש-Vite צריך (עם VITE_)
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: dist
 
   deploy:
     needs: build
