@@ -6,9 +6,14 @@ import { supabase } from './lib/supabaseClient'
 import { GroupSwitcher } from './components/GroupSwitcher'
 import { InviteButton } from './components/InviteButton'
 import { ExpenseForm } from './components/ExpenseForm'
-import BalancesPanel from './components/BalancesPanel' // ← default import
+import BalancesPanel from './components/BalancesPanel'
 import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
-import type { Member } from './lib/settlements' // טיפוס לחברי קבוצה
+
+// 👉 טיפוס הקבוצה וה־RPC מגיעים ממקור יחיד
+import type { Group } from './lib/supaRest'
+import { createGroupFull } from './lib/supaRest'
+
+import type { Member } from './lib/settlements'
 
 /* ---------- Types ---------- */
 export type Profile = {
@@ -17,10 +22,8 @@ export type Profile = {
   display_name: string | null
 }
 
-export type Group = {
-  id: string
-  name: string
-}
+// ❌ אל תגדיר כאן שוב type Group – זה מה שיצר את הקונפליקט
+// export type Group = { ... }  ← למחוק!
 
 export type Expense = {
   id: string
@@ -51,14 +54,13 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
-  // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
   /* ----- auth ----- */
   useEffect(() => {
-    let unsub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
-    return () => { unsub?.subscription?.unsubscribe?.() }
+    return () => { data?.subscription?.unsubscribe?.() }
   }, [])
 
   /* ----- profile + groups ----- */
@@ -74,7 +76,6 @@ export default function App() {
         .maybeSingle()
       setProfile(prof ?? null)
 
-      // חברות בקבוצות
       const { data: mems } = await supabase
         .from('memberships')
         .select('groups(*), role')
@@ -88,7 +89,7 @@ export default function App() {
       if (!group && gs[0]) setGroup(gs[0])
       if (mems && mems[0]) setRole(mems[0].role)
     })()
-  }, [session]) // group בכוונה לא תלוי כאן כדי לא ליצור לולאה
+  }, [session]) // לא תלוי ב-group כדי למנוע לולאה
 
   /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) ----- */
   useEffect(() => {
@@ -103,6 +104,7 @@ export default function App() {
           .from('memberships')
           .select('groups(*)')
           .eq('user_id', session.user.id)
+
         const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
         setGroups(gs)
         if (gs[0]) setGroup(gs[0])
@@ -119,40 +121,39 @@ export default function App() {
 
   /* ----- load members for current group (for BalancesPanel) ----- */
   useEffect(() => {
-  if (!group) {
-    setMembers([]);
-    return;
-  }
-
-  (async () => {
-    const { data, error } = await supabase
-      .from('memberships')
-      .select(`
-        user_id,
-        profiles:profiles!inner (
-          id,
-          display_name,
-          email
-        )
-      `)
-      .eq('group_id', group.id);
-
-    if (error) {
-      console.error('load members failed:', error.message);
-      setMembers([]);
-      return;
+    if (!group) {
+      setMembers([])
+      return
     }
 
-    // ✔︎ מוסיפים user_id כדי להתאים לטיפוס Member הנדרש
-    const ms: Member[] = (data ?? []).map((m: any) => ({
-      uid: m.user_id,
-      user_id: m.user_id,
-      name: m.profiles?.display_name || m.profiles?.email || m.user_id,
-    }));
+    (async () => {
+      const { data, error } = await supabase
+        .from('memberships')
+        .select(`
+          user_id,
+          profiles:profiles!inner (
+            id,
+            display_name,
+            email
+          )
+        `)
+        .eq('group_id', group.id)
 
-    setMembers(ms);
-  })();
-}, [group]);
+      if (error) {
+        console.error('load members failed:', error.message)
+        setMembers([])
+        return
+      }
+
+      const ms: Member[] = (data ?? []).map((m: any) => ({
+        uid: m.user_id,
+        user_id: m.user_id,
+        name: m.profiles?.display_name || m.profiles?.email || m.user_id,
+      }))
+
+      setMembers(ms)
+    })()
+  }, [group])
 
   /* ----- filters + totals ----- */
   const filtered = useMemo(() => {
@@ -179,21 +180,16 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
+  // יצירת קבוצה דרך RPC (עוקף RLS על insert ישיר)
   const createGroup = async () => {
     const name = prompt('שם קבוצה חדש:')
     if (!name || !session) return
-    const { data, error } = await supabase
-      .from('groups')
-      .insert({ name })
-      .select()
-      .maybeSingle()
-    if (error) {
-      alert(error.message)
-      return
-    }
-    if (data) {
-      setGroups((prev) => [data, ...prev])
-      setGroup(data)
+    try {
+      const newGroup = await createGroupFull(name) // ← מחזיר Group מלא
+      setGroups((prev) => [newGroup, ...prev])
+      setGroup(newGroup)
+    } catch (err: any) {
+      alert(err?.message ?? 'שגיאה ביצירת קבוצה')
     }
   }
 
@@ -221,9 +217,12 @@ export default function App() {
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
           groups={groups}
-          current={group}
-          onSelect={setGroup}
-          onCreated={(g) => {
+          current={group?.id ?? null}                    // ← שולחים id
+          onSelect={(gid) => {                           // ← מקבלים id
+            const g = groups.find((x) => x.id === gid) || null
+            setGroup(g)
+          }}
+          onCreate={(g) => {                             // ← אחרי יצירה
             setGroups((prev) => [g, ...prev])
             setGroup(g)
           }}
