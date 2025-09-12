@@ -1,7 +1,5 @@
-// src/lib/supaRest.ts
 import { supabase } from "./supabaseClient";
 
-/** ENV */
 const URL = import.meta.env.VITE_SUPABASE_URL as string;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -9,14 +7,13 @@ if (!URL || !KEY) {
   throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY");
 }
 
-/** החזרת Authorization עם access_token אם יש סשן, אחרת anon key */
+// אם המשתמש מחובר – נשתמש ב-access_token שלו (כדי ש-RLS עם auth.uid() יעבוד)
 async function getAuthHeader(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? KEY;
   return `Bearer ${token}`;
 }
 
-/** מעטפת fetch שמוסיפה apikey + Authorization לכל בקשה */
 async function rest(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("apikey", KEY);
@@ -27,24 +24,23 @@ async function rest(path: string, init: RequestInit = {}) {
   return fetch(`${URL}${path}`, { ...init, headers });
 }
 
-/** ---------- Types ---------- */
+/* ---------- Types ---------- */
 export type Group = {
   id: string;
   name: string;
-  created_at: string;
+  created_at?: string;        // השאר אופציונלי להיות גמישים
   created_by?: string | null;
 };
 
-/** רשימת קבוצות למשתמש המחובר (מוגבל ע"י RLS) */
+/* ---------- API ---------- */
 export async function fetchGroups(): Promise<Group[]> {
   const res = await rest(`/rest/v1/groups?select=*&order=created_at.desc`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-/** יוצר קבוצה, ואז מחזיר את *האובייקט המלא* של הקבוצה החדשה */
+/** RPC: create_group(p_name text) -> uuid, ואז נחזיר את הרשומה המלאה */
 export async function createGroupFull(name: string): Promise<Group> {
-  // 1) קריאה ל-RPC שמחזירה UUID
   const rpc = await rest(`/rest/v1/rpc/create_group`, {
     method: "POST",
     body: JSON.stringify({ p_name: name.trim() }),
@@ -52,11 +48,9 @@ export async function createGroupFull(name: string): Promise<Group> {
   if (!rpc.ok) throw new Error(await rpc.text());
   const newId: string = await rpc.json();
 
-  // 2) שליפה של הרשומה המלאה (RLS: אחרי יצירה אתה Owner => רואה אותה)
   const r = await rest(`/rest/v1/groups?id=eq.${newId}&select=*`);
   if (!r.ok) throw new Error(await r.text());
   const rows: Group[] = await r.json();
-  const g = rows[0];
-  if (!g) throw new Error("Failed to load created group");
-  return g;
+  if (!rows[0]) throw new Error("Failed to load created group");
+  return rows[0];
 }

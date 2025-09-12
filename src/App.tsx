@@ -185,7 +185,7 @@ export default function App() {
     const name = prompt('שם קבוצה חדש:')
     if (!name || !session) return
     try {
-      const newGroup = await createGroupFull(name) // ← מחזיר Group מלא
+      const newGroup = await createGroupFull(name)
       setGroups((prev) => [newGroup, ...prev])
       setGroup(newGroup)
     } catch (err: any) {
