@@ -2,29 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { LogOut, Plus } from 'lucide-react'
 
-import { supabase } from './lib/supabaseClient'
+import { supabase, ensureProfileForCurrentUser } from './lib/supabaseClient'
 import { GroupSwitcher } from './components/GroupSwitcher'
 import { InviteButton } from './components/InviteButton'
 import { ExpenseForm } from './components/ExpenseForm'
 import BalancesPanel from './components/BalancesPanel'
 import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 
-// 👉 טיפוס הקבוצה וה־RPC מגיעים ממקור יחיד
-import type { Group } from './lib/supaRest'
-import { createGroupFull } from './lib/supaRest'
-
+import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
 
-/* ---------- Types ---------- */
-export type Profile = {
-  id: string
-  email: string | null
-  display_name: string | null
-}
-
-// ❌ אל תגדיר כאן שוב type Group – זה מה שיצר את הקונפליקט
-// export type Group = { ... }  ← למחוק!
-
+/* ---------- Types used here ---------- */
 export type Expense = {
   id: string
   group_id: string
@@ -54,14 +42,21 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
+  // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
   /* ----- auth ----- */
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
-    return () => { data?.subscription?.unsubscribe?.() }
+    return () => sub?.subscription?.unsubscribe?.()
   }, [])
+
+  // ודא שקיים פרופיל לאחר התחברות
+  useEffect(() => {
+    if (!session) return
+    ensureProfileForCurrentUser().catch(() => {})
+  }, [session])
 
   /* ----- profile + groups ----- */
   useEffect(() => {
@@ -73,13 +68,18 @@ export default function App() {
         .from('profiles')
         .select('*')
         .eq('id', uid)
-        .maybeSingle()
+        .maybeSingle<Profile>()
       setProfile(prof ?? null)
 
-      const { data: mems } = await supabase
+      // חברות בקבוצות
+      const { data: mems, error: memErr } = await supabase
         .from('memberships')
         .select('groups(*), role')
         .eq('user_id', uid)
+
+      if (memErr) {
+        console.error('load memberships failed:', memErr.message)
+      }
 
       const gs: Group[] = (mems || [])
         .map((m: any) => m.groups)
@@ -108,6 +108,7 @@ export default function App() {
         const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
         setGroups(gs)
         if (gs[0]) setGroup(gs[0])
+
         url.searchParams.delete('invite')
         window.history.replaceState({}, '', url.toString())
       } else {
@@ -126,7 +127,7 @@ export default function App() {
       return
     }
 
-    (async () => {
+    ;(async () => {
       const { data, error } = await supabase
         .from('memberships')
         .select(`
@@ -180,26 +181,56 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
-  // יצירת קבוצה דרך RPC (עוקף RLS על insert ישיר)
+  // יצירת קבוצה חדשה – קודם RPC create_group (מוסיף גם חברות owner), ואם אין – נפילה חכמה ל-INSERT רגיל + חברות
   const createGroup = async () => {
-  const name = prompt('שם קבוצה חדש:');
-  if (!name) return;
-  try {
-    const createGroup = async () => {
-      const name = prompt("שם קבוצה חדש:");
-      if (!name) return;
-      try {
-        const newGroup = await createGroupFull(name);
-        setGroups((prev) => [newGroup, ...prev]);
-        setGroup(newGroup);
-      } catch (err: any) {
-        alert(err?.message ?? "שגיאה ביצירת קבוצה");
+    const name = prompt('שם קבוצה חדש:')?.trim()
+    if (!name || !session) return
+
+    try {
+      // ניסיון ראשון: RPC שמבצע גם יצירת חברות כ-owner
+      const rpc = await supabase.rpc('create_group', { p_name: name })
+      // supabase-js לא תמיד מטייפ יפה – נחלץ ידנית את השורה אם קיימת
+      const row = (rpc as any)?.data as Group | null
+      const error = (rpc as any)?.error as { message?: string } | null
+
+      if (!error && row) {
+        setGroups((prev) => [row, ...prev])
+        setGroup(row)
+        setRole('owner')
+        return
       }
-    };
-  } catch (err: any) {
-    alert(err?.message ?? 'שגיאה ביצירת קבוצה');
+    } catch (e) {
+      // נמשיך ל-fallback
+    }
+
+    try {
+      // Fallback: יצירת קבוצה רגילה
+      const { data: gRaw, error: e1 } = await supabase
+        .from('groups')
+        .insert({ name })
+        .select('*')
+        .maybeSingle()
+
+      if (e1 || !gRaw) throw e1 ?? new Error('יצירת קבוצה נכשלה')
+      const g = gRaw as Group
+
+      // הוספת חברות כ-owner – יצליח בזכות RLS (user_id = auth.uid())
+      const { error: e2 } = await supabase.from('memberships').insert({
+        group_id: g.id,
+        user_id: session.user.id,
+        role: 'owner',
+      })
+
+      if (e2) console.warn('הוספת חברות נכשלה:', e2.message)
+
+      setGroups((prev) => [g, ...prev])
+      setGroup(g)
+      setRole('owner')
+    } catch (err: any) {
+      console.error('[createGroup] error', err)
+      alert(err?.message ?? 'יצירת קבוצה נכשלה')
+    }
   }
-};
 
   /* ----- guards ----- */
   if (!session) return <AuthScreen />
@@ -227,7 +258,10 @@ export default function App() {
           groups={groups}
           current={group}
           onSelect={setGroup}
-          onCreated={createGroup}   // ההורה יוצר קבוצה (RPC) ומעדכן state
+          onCreated={(g) => {
+            setGroups((prev) => [g, ...prev])
+            setGroup(g)
+          }}
         />
         <div className='flex-1' />
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
@@ -343,7 +377,7 @@ export default function App() {
       {showForm && (
         <ExpenseForm
           groupId={group.id}
-          currentPayerName={profile?.display_name || profile?.email || (session?.user?.email ?? 'משתמש')}
+          currentPayerName={currentPayerName}
           categories={CATEGORIES}
           onClose={() => setShowForm(false)}
           onSaved={() => {
