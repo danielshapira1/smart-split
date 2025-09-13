@@ -147,16 +147,16 @@ export default function App() {
     }
     ;(async () => {
       const { data, error } = await supabase
-        .from('memberships')
-        .select(`
-          user_id,
-          profiles:profiles!inner (
-            id,
-            display_name,
-            email
-          )
-        `)
-        .eq('group_id', group.id)
+      .from('memberships')
+      .select(`
+        user_id,
+        profiles:profiles!memberships_user_id_fkey (
+          id,
+          display_name,
+          email
+        )
+      `)
+      .eq('group_id', group.id)
 
       if (error) {
         console.error('load members failed:', error.message)
