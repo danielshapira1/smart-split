@@ -182,16 +182,16 @@ export default function App() {
 
   // יצירת קבוצה דרך RPC (עוקף RLS על insert ישיר)
   const createGroup = async () => {
-    const name = prompt('שם קבוצה חדש:')
-    if (!name || !session) return
-    try {
-      const newGroup = await createGroupFull(name)
-      setGroups((prev) => [newGroup, ...prev])
-      setGroup(newGroup)
-    } catch (err: any) {
-      alert(err?.message ?? 'שגיאה ביצירת קבוצה')
-    }
+  const name = prompt('שם קבוצה חדש:');
+  if (!name) return;
+  try {
+    const newGroup = await createGroupFull(name);
+    setGroups((prev) => [newGroup, ...prev]);
+    setGroup(newGroup);
+  } catch (err: any) {
+    alert(err?.message ?? 'שגיאה ביצירת קבוצה');
   }
+};
 
   /* ----- guards ----- */
   if (!session) return <AuthScreen />

@@ -7,17 +7,16 @@ if (!URL || !KEY) {
   throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY");
 }
 
-// אם המשתמש מחובר – נשתמש ב-access_token שלו (כדי ש-RLS עם auth.uid() יעבוד)
-async function getAuthHeader(): Promise<string> {
+// תמיד שולחים apikey + Authorization (access_token אם יש, אחרת anon key)
+async function authHeader(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? KEY;
-  return `Bearer ${token}`;
+  return `Bearer ${session?.access_token ?? KEY}`;
 }
 
 async function rest(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("apikey", KEY);
-  headers.set("Authorization", await getAuthHeader());
+  headers.set("Authorization", await authHeader());
   if (!headers.has("Content-Type") && init.method && init.method !== "GET") {
     headers.set("Content-Type", "application/json");
   }
@@ -28,29 +27,58 @@ async function rest(path: string, init: RequestInit = {}) {
 export type Group = {
   id: string;
   name: string;
-  created_at?: string;        // השאר אופציונלי להיות גמישים
+  created_at?: string;
   created_by?: string | null;
 };
 
+export type ExpenseInsert = {
+  group_id: string;
+  user_id: string;        // תמיד יהיה auth.uid()
+  amount_cents: number;
+  currency: string;       // 'ILS'
+  description?: string;
+  category?: string;
+  occurred_on?: string;   // YYYY-MM-DD
+};
+
 /* ---------- API ---------- */
-export async function fetchGroups(): Promise<Group[]> {
-  const res = await rest(`/rest/v1/groups?select=*&order=created_at.desc`);
+
+// יוצר קבוצה ע"י RPC שמחזיר את השורה המלאה
+export async function createGroupFull(name: string): Promise<Group> {
+  const res = await rest(`/rest/v1/rpc/create_group`, {
+    method: "POST",
+    body: JSON.stringify({ p_name: name.trim() }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const g = await res.json();
+  if (!g || !g.id) throw new Error("RPC did not return group");
+  return g as Group;
+}
+
+// יוצר הזמנה ומחזיר token (uuid)
+export async function createInvite(groupId: string, role: 'member'|'admin'|'owner' = 'member'): Promise<string> {
+  const res = await rest(`/rest/v1/rpc/create_invite`, {
+    method: "POST",
+    body: JSON.stringify({ p_group_id: groupId, p_role: role }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-/** RPC: create_group(p_name text) -> uuid, ואז נחזיר את הרשומה המלאה */
-export async function createGroupFull(name: string): Promise<Group> {
-  const rpc = await rest(`/rest/v1/rpc/create_group`, {
+// מקבל הזמנה לפי token
+export async function acceptInvite(token: string): Promise<void> {
+  const res = await rest(`/rest/v1/rpc/accept_invite`, {
     method: "POST",
-    body: JSON.stringify({ p_name: name.trim() }),
+    body: JSON.stringify({ p_token: token }),
   });
-  if (!rpc.ok) throw new Error(await rpc.text());
-  const newId: string = await rpc.json();
+  if (!res.ok) throw new Error(await res.text());
+}
 
-  const r = await rest(`/rest/v1/groups?id=eq.${newId}&select=*`);
-  if (!r.ok) throw new Error(await r.text());
-  const rows: Group[] = await r.json();
-  if (!rows[0]) throw new Error("Failed to load created group");
-  return rows[0];
+// הוספת הוצאה לטבלת expenses (שימו לב: בלי payer_name)
+export async function saveExpenseRow(exp: ExpenseInsert): Promise<void> {
+  const res = await rest(`/rest/v1/expenses`, {
+    method: "POST",
+    body: JSON.stringify([exp]),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }

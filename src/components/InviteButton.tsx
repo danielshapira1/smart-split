@@ -1,29 +1,35 @@
-import React, { useState } from 'react'
-import { Link2 } from 'lucide-react'
-import { supabase } from '../lib/supabaseClient'
+import React from "react";
+import { createInvite } from "../lib/supaRest";
 
-export function InviteButton({ groupId, isAdmin }:{ groupId: string, isAdmin: boolean }) {
-  const [link, setLink] = useState<string>('')
-  const [error, setError] = useState<string | null>(null)
+type Props = {
+  groupId: string;
+  isAdmin?: boolean; // owner/admin בלבד יתנו תוקן
+};
 
-  const create = async () => {
-    setError(null)
-    const { data, error } = await supabase.rpc('create_invite', { p_group_id: groupId, p_role: 'member' })
-    if (error) { setError(error.message); return }
-    const url = new URL(window.location.href)
-    url.searchParams.set('invite', data as unknown as string)
-    setLink(url.toString())
-    try { await navigator.clipboard.writeText(url.toString()) } catch {}
-  }
+export function InviteButton({ groupId, isAdmin }: Props) {
+  const onInvite = async () => {
+    try {
+      if (!isAdmin) {
+        alert("רק מנהל/בעלים יכול ליצור הזמנה");
+        return;
+      }
+      const token = await createInvite(groupId, "member");
+      const base = import.meta.env.BASE_URL || "/";
+      const link = `${window.location.origin}${base}?invite=${token}`;
+      await navigator.clipboard.writeText(link);
+      alert("קישור הזמנה הועתק ללוח:\n" + link);
+    } catch (e: any) {
+      alert(e?.message ?? "Invite failed");
+    }
+  };
 
-  if (!isAdmin) return null
   return (
-    <div className='flex items-center gap-2'>
-      <button onClick={create} className='text-sm bg-slate-900 text-white rounded-full px-3 py-1.5 flex items-center gap-1'>
-        <Link2 className='w-4 h-4'/> הזמנה
-      </button>
-      {link && <span className='text-[10px] text-gray-500 truncate max-w-[120px]'>{link}</span>}
-      {error && <span className='text-xs text-red-600'>{error}</span>}
-    </div>
-  )
+    <button
+      onClick={onInvite}
+      className="rounded-full bg-slate-100 px-3 py-2 text-sm"
+      title="יצירת קישור הזמנה"
+    >
+      הזמן +
+    </button>
+  );
 }
