@@ -12,6 +12,7 @@ import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
 
+/* ---------- Types used here ---------- */
 export type Expense = {
   id: string
   group_id: string
@@ -27,9 +28,9 @@ export type Expense = {
 
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
 
+/* ---------- App ---------- */
 export default function App() {
-  const [session, setSession] =
-    useState<import('@supabase/supabase-js').Session | null>(null)
+  const [session, setSession] = useState<import('@supabase/supabase-js').Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
 
   const [groups, setGroups] = useState<Group[]>([])
@@ -41,24 +42,26 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
+  // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
-  /* ---------- auth ---------- */
+  /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
     return () => sub?.subscription?.unsubscribe?.()
   }, [])
 
-  // ליצור/לעדכן פרופיל אחרי התחברות
+  // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
     if (!session) return
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ---------- profile + groups ---------- */
+  /* ----- profile + groups (NEW) ----- */
   useEffect(() => {
     if (!session) return
+
     ;(async () => {
       const uid = session.user.id
 
@@ -70,93 +73,112 @@ export default function App() {
         .maybeSingle<Profile>()
       setProfile(prof ?? null)
 
-      // קבוצות דרך memberships עם join ל-groups
-      const { data: mems, error: memErr } = await supabase
+      // כל החברויות עם group מלא
+      const { data: mems, error } = await supabase
         .from('memberships')
-        .select('role, groups(*)') // דורש ה-policy שהוספנו ל-groups
+        .select(`
+          role,
+          groups:groups(*)
+        `)
         .eq('user_id', uid)
 
-      if (memErr) {
-        console.error('load memberships failed:', memErr.message)
+      if (error) {
+        console.error('load memberships failed:', error.message)
+        setGroups([])
+        setGroup(null)
+        setRole('member')
+        return
       }
 
-      const gs: Group[] = (mems || [])
+      const gs = (mems ?? [])
         .map((m: any) => m.groups)
-        .filter(Boolean)
+        .filter(Boolean) as Group[]
 
       setGroups(gs)
 
-      // לבחור קבוצה: אם יש נוכחית ועדיין קיימת – להשאיר; אחרת הראשונה
-      if (gs.length) {
-        const nextGroup: Group | null =
-        (group ? gs.find(g => g.id === group.id) ?? null : null)   // נסה לשמור את הבחירה הקודמת
-        ?? (gs[0] ?? null)
-      } else {
-        setGroup(null)
-      }
-
-      // עדכון role לפי החברות בקבוצה הנבחרת
-      if (group && mems) {
-        const found = mems.find((m: any) => m.groups?.id === group.id)
-        if (found) setRole(found.role)
-        else setRole('member')
-      } else {
-        setRole(mems?.[0]?.role ?? 'member')
-      }
+      // שומר קבוצה קיימת אם עדיין קיימת, אחרת הראשונה, ואם אין – null
+      setGroup(prev => {
+        if (prev && gs.some(g => g.id === prev.id)) return prev
+        return gs[0] ?? null
+      })
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
 
-  /* ---------- קבלה מהירה של הזמנה (?invite=TOKEN) ---------- */
+  /* ----- role for current group (NEW) ----- */
+  useEffect(() => {
+    if (!session || !group) {
+      setRole('member')
+      return
+    }
+
+    ;(async () => {
+      const { data, error } = await supabase
+        .from('memberships')
+        .select('role')
+        .eq('user_id', session.user.id)
+        .eq('group_id', group.id)
+        .maybeSingle()
+
+      if (error) {
+        console.warn('load role failed:', error.message)
+        setRole('member')
+        return
+      }
+      setRole(data?.role ?? 'member')
+    })()
+  }, [session?.user?.id, group?.id])
+
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) ----- */
   useEffect(() => {
     if (!session) return
-    ;(async () => {
-      const url = new URL(window.location.href)
-      const token = url.searchParams.get('invite')
-      if (!token) return
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('invite')
+    if (!token) return
 
-      const { error } = await supabase.rpc('accept_invite', { p_token: token })
-      if (error) {
-        console.error('accept_invite failed:', error.message)
-      } else {
-        // לרענן את רשימת הקבוצות אחרי הצטרפות
+    supabase.rpc('accept_invite', { p_token: token }).then(async ({ error }) => {
+      if (!error) {
         const { data: mems } = await supabase
           .from('memberships')
-          .select('role, groups(*)')
+          .select('groups(*)')
           .eq('user_id', session.user.id)
 
         const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
         setGroups(gs)
-        if (gs[0]) setGroup(gs[0])
-      }
+        setGroup(prev => {
+          if (prev && gs.some(g => g.id === prev.id)) return prev
+          return gs[0] ?? null
+        })
 
-      // ניקוי ה-URL
-      url.searchParams.delete('invite')
-      window.history.replaceState({}, '', url.toString())
-    })()
+        url.searchParams.delete('invite')
+        window.history.replaceState({}, '', url.toString())
+      } else {
+        console.error('accept_invite failed:', error?.message)
+      }
+    })
   }, [session])
 
-  /* ---------- realtime expenses ---------- */
+  /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ---------- חברי קבוצה (למאזנים) ---------- */
+  /* ----- load members for current group (uses explicit FK alias) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
       return
     }
+
     ;(async () => {
       const { data, error } = await supabase
-      .from('memberships')
-      .select(`
-        user_id,
-        profiles:profiles!memberships_user_id_fkey (
-          id,
-          display_name,
-          email
-        )
-      `)
-      .eq('group_id', group.id)
+        .from('memberships')
+        .select(`
+          user_id,
+          profiles:profiles!memberships_user_id_fkey (
+            id,
+            display_name,
+            email
+          )
+        `)
+        .eq('group_id', group.id)
 
       if (error) {
         console.error('load members failed:', error.message)
@@ -169,11 +191,12 @@ export default function App() {
         user_id: m.user_id,
         name: m.profiles?.display_name || m.profiles?.email || m.user_id,
       }))
+
       setMembers(ms)
     })()
   }, [group])
 
-  /* ---------- סינון וסיכום ---------- */
+  /* ----- filters + totals ----- */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return expenses.filter((e) => {
@@ -189,18 +212,16 @@ export default function App() {
   )
 
   const currentPayerName =
-    profile?.display_name || profile?.email || (session?.user?.email ?? 'משתמש')
+    profile?.display_name ||
+    profile?.email ||
+    (session?.user?.email ?? 'משתמש')
 
-  /* ---------- פעולות ---------- */
+  /* ----- actions ----- */
   const signOut = async () => {
-    // ניסיון גלובלי; אם אין session פעיל בשרת נקבל 403 – נתעלם
-    try {
-      await supabase.auth.signOut({ scope: 'global' } as any)
-    } catch {
-      await supabase.auth.signOut()
-    }
+    await supabase.auth.signOut()
   }
 
+  // יצירת קבוצה חדשה – RPC ואם לא מצליח נופלים ל־INSERT רגיל + חברות
   const createGroup = async () => {
     const name = prompt('שם קבוצה חדש:')?.trim()
     if (!name || !session) return
@@ -217,7 +238,7 @@ export default function App() {
         return
       }
     } catch {
-      /* נופלים ל-fallback */
+      // נמשיך ל-fallback
     }
 
     try {
@@ -235,6 +256,7 @@ export default function App() {
         user_id: session.user.id,
         role: 'owner',
       })
+
       if (e2) console.warn('הוספת חברות נכשלה:', e2.message)
 
       setGroups((prev) => [g, ...prev])
@@ -246,31 +268,24 @@ export default function App() {
     }
   }
 
-  /* ---------- מסכים ---------- */
+  /* ----- guards ----- */
   if (!session) return <AuthScreen />
 
   if (!group) {
-    const fullName =
-      profile?.display_name || profile?.email || session.user.email || 'משתמש'
     return (
       <div className='h-full flex flex-col items-center justify-center gap-4'>
-        <p className='text-gray-600'>
-          שלום{' '}
-          <span className='inline-block max-w-[12rem] align-bottom truncate' title={fullName}>
-            {fullName}
-          </span>
-        </p>
         <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
-        <button className='rounded-full bg-black text-white px-4 py-2' onClick={createGroup}>
+        <button
+          className='rounded-full bg-black text-white px-4 py-2'
+          onClick={createGroup}
+        >
           צור קבוצה חדשה
         </button>
       </div>
     )
   }
 
-  /* ---------- UI ---------- */
-  const fullName = profile?.display_name || profile?.email || session.user.email || 'משתמש'
-
+  /* ---------- render ---------- */
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
       {/* header */}
@@ -284,14 +299,6 @@ export default function App() {
             setGroup(g)
           }}
         />
-        {/* שלום {username} עם קיטוע ו-hover; בלחיצה נציג את השם המלא */}
-        <div
-          className='ms-2 text-sm text-gray-700 max-w-[10rem] truncate'
-          title={fullName}
-          onClick={() => alert(fullName)}
-        >
-          שלום <span className='font-medium'>{fullName}</span>
-        </div>
         <div className='flex-1' />
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
@@ -430,7 +437,7 @@ function AuthScreen() {
     const redirectTo = `${window.location.origin}${base}`
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo },
+      options: { redirectTo }
     })
     if (error) setError(error.message)
   }
@@ -442,7 +449,7 @@ function AuthScreen() {
     const redirectTo = `${window.location.origin}${base}`
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: redirectTo }
     })
     if (error) setError(error.message)
     else setSent(true)
