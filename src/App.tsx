@@ -48,118 +48,140 @@ export default function App() {
   /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
-    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+    ;(async () => {
+      const { data } = await supabase.auth.getSession()
+      setSession(data.session ?? null)
+    })()
     return () => sub?.subscription?.unsubscribe?.()
   }, [])
 
   // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
     if (!session) return
-    ensureProfileForCurrentUser().catch(() => {})
-  }, [session])
-
-  /* ----- profile + groups ----- */
-  useEffect(() => {
-    if (!session) return
     ;(async () => {
-      const uid = session.user.id
-
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', uid)
-        .maybeSingle<Profile>()
-      setProfile(prof ?? null)
-
-      // חברות בקבוצות
-      const { data: mems, error: memErr } = await supabase
-        .from('memberships')
-        .select('groups(*), role')
-        .eq('user_id', uid)
-
-      if (memErr) {
-        console.error('load memberships failed:', memErr.message)
-      }
-
-      const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
-      setGroups(gs)
-
-      // אם אין קבוצה נוכחית – קח את הראשונה (אם קיימת)
-      const nextGroup = group ?? gs[0] ?? null
-      setGroup(nextGroup ?? null)
-
-      // קבע role עבור הקבוצה שנבחרה בפועל
-      if (nextGroup) {
-        const forSelected = (mems || []).find((m: any) => m.groups?.id === nextGroup.id)
-        if (forSelected?.role) setRole(forSelected.role)
-        else setRole('member')
-      } else {
-        setRole('member')
+      try {
+        await ensureProfileForCurrentUser()
+      } catch {
+        // מתעלמים בשקט
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session])
+
+  /* ----- profile + groups (טעינה ראשונית) ----- */
+  useEffect(() => {
+    if (!session) return
+
+    ;(async () => {
+      try {
+        const uid = session.user.id
+
+        // פרופיל
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', uid)
+          .maybeSingle<Profile>()
+        setProfile(prof ?? null)
+
+        // חברות בקבוצות (ללא join בעייתי)
+        const { data: memRows, error: memErr } = await supabase
+          .from('memberships')
+          .select('group_id, role')
+          .eq('user_id', uid)
+
+        if (memErr) throw memErr
+        const mems = (memRows ?? []) as Array<{ group_id: string; role: string }>
+
+        // משוך את פרטי הקבוצות לפי מזהים
+        const groupIds = [...new Set(mems.map((m) => m.group_id))]
+        let gs: Group[] = []
+        if (groupIds.length) {
+          const { data: gRows, error: gErr } = await supabase
+            .from('groups')
+            .select('*')
+            .in('id', groupIds)
+
+          if (gErr) throw gErr
+          gs = (gRows ?? []) as Group[]
+        }
+
+        setGroups(gs)
+
+        // בחר קבוצה נוכחית אם אין
+        const firstGroup = gs[0] as Group | undefined
+        if (!group && firstGroup) setGroup(firstGroup)
+
+        // קבע תפקיד בהתאם לקבוצה הנוכחית / הראשונה, עם בדיקות בטוחות
+        if (group && mems.length) {
+          const found = mems.find((m) => m.group_id === group.id)
+          if (found?.role) setRole(found.role)
+        } else if (!group && firstGroup && mems.length) {
+          const found = mems.find((m) => m.group_id === firstGroup.id)
+          if (found?.role) setRole(found.role)
+        }
+      } catch (err) {
+        console.error('initial load failed:', err)
+      }
+    })()
   }, [session]) // לא תלוי ב-group כדי למנוע לולאה
 
-  /* ----- עדכון role כשמחליפים קבוצה ----- */
+  // הבאת תפקיד לפי קבוצה נוכחית בכל שינוי קבוצה
   useEffect(() => {
-  if (!session || !group) return;
+    if (!session || !group) return
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('memberships')
+          .select('role')
+          .eq('group_id', group.id)
+          .eq('user_id', session.user.id)
+          .maybeSingle()
 
-  (async () => {
-    try {
-      const { data, error } = await supabase
-        .from('memberships')
-        .select('role')
-        .eq('group_id', group.id)
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      setRole((data?.role as string) || 'member');
-    } catch (err) {
-      console.error('load role failed:', err);
-      setRole('member');
-    }
-  })();
-}, [group?.id, session?.user?.id]);
-
+        if (!error && data) setRole(data.role)
+      } catch {}
+    })()
+  }, [group?.id, session?.user.id])
 
   /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) ----- */
   useEffect(() => {
     if (!session) return
-    const url = new URL(window.location.href)
-    const token = url.searchParams.get('invite')
-    if (!token) return
 
-    supabase.rpc('accept_invite', { p_token: token }).then(async ({ error }) => {
-      if (!error) {
-        const { data: mems } = await supabase
-          .from('memberships')
-          .select('groups(*), role')
-          .eq('user_id', session.user.id)
+    ;(async () => {
+      const url = new URL(window.location.href)
+      const token = url.searchParams.get('invite')
+      if (!token) return
 
-        const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
-        setGroups(gs)
+      try {
+        const { error } = await supabase.rpc('accept_invite', { p_token: token })
+        if (error) {
+          console.error('accept_invite failed:', error.message)
+        } else {
+          // רענון קבוצות לאחר הצטרפות
+          const { data: mems } = await supabase
+            .from('memberships')
+            .select('group_id')
+            .eq('user_id', session.user.id)
 
-        const g0 = gs[0] ?? null
-        setGroup(g0)
-        if (g0) {
-          const found = (mems || []).find((m: any) => m.groups?.id === g0.id)
-          if (found?.role) setRole(found.role)
+          const ids = [...new Set((mems ?? []).map((m: any) => m.group_id))]
+          if (ids.length) {
+            const { data: gRows } = await supabase.from('groups').select('*').in('id', ids)
+            const gs = (gRows ?? []) as Group[]
+            setGroups(gs)
+            if (gs[0]) setGroup(gs[0])
+          }
         }
-
+      } finally {
+        // נקה את הפרמטר מהכתובת
         url.searchParams.delete('invite')
         window.history.replaceState({}, '', url.toString())
-      } else {
-        console.error('accept_invite failed:', error?.message)
       }
-    })
+    })()
   }, [session])
 
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group (for BalancesPanel) ----- */
+  /* ----- load members for current group (ללא JOIN; שני שלבים) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -167,33 +189,43 @@ export default function App() {
     }
 
     ;(async () => {
-      const { data, error } = await supabase
-        .from('memberships')
-        .select(`
-          user_id,
-          profiles:profiles!inner (
-            id,
-            display_name,
-            email
-          )
-        `)
-        .eq('group_id', group.id)
+      try {
+        // 1) כל המשתמשים החברים בקבוצה
+        const { data: memRows, error: e1 } = await supabase
+          .from('memberships')
+          .select('user_id')
+          .eq('group_id', group.id)
 
-      if (error) {
-        console.error('load members failed:', error.message)
+        if (e1) throw e1
+
+        const ids = [...new Set((memRows ?? []).map((r: any) => r.user_id))]
+        if (ids.length === 0) {
+          setMembers([])
+          return
+        }
+
+        // 2) פרופילים עבור אותם משתמשים
+        const { data: profRows, error: e2 } = await supabase
+          .from('profiles')
+          .select('id, display_name, email')
+          .in('id', ids)
+
+        if (e2) throw e2
+
+        const byId = new Map((profRows ?? []).map((p: any) => [p.id, p]))
+        const ms: Member[] = ids.map((id) => ({
+          uid: id,
+          user_id: id,
+          name: byId.get(id)?.display_name || byId.get(id)?.email || id,
+        }))
+
+        setMembers(ms)
+      } catch (err) {
+        console.error('load members failed:', err)
         setMembers([])
-        return
       }
-
-      const ms: Member[] = (data ?? []).map((m: any) => ({
-        uid: m.user_id,
-        user_id: m.user_id,
-        name: m.profiles?.display_name || m.profiles?.email || m.user_id,
-      }))
-
-      setMembers(ms)
     })()
-  }, [group])
+  }, [group?.id])
 
   /* ----- filters + totals ----- */
   const filtered = useMemo(() => {
@@ -216,41 +248,23 @@ export default function App() {
     (session?.user?.email ?? 'משתמש')
 
   /* ----- actions ----- */
-
-  // התנתקות יציבה: ננסה global, ננקה גם local, נרוקן state ונרענן URL
   const signOut = async () => {
     try {
-      const { data: { session: s } } = await supabase.auth.getSession()
-      if (s) {
-        try {
-          await supabase.auth.signOut({ scope: 'global' })
-        } catch {
-          // יתכן 403 session_not_found – נמשיך לפולבאק
-        }
-      }
-    } finally {
-      try { await supabase.auth.signOut({ scope: 'local' }) } catch {}
-      try { supabase.removeAllChannels?.() } catch {}
-      // ניקוי מצב מקומי
-      setProfile(null)
-      setGroups([])
-      setGroup(null)
-      setRole('member')
+      // הימנע מ־403: scope='local'
+      await supabase.auth.signOut({ scope: 'local' })
       setSession(null)
-      // רענון URL נקי
-      const base = import.meta.env.BASE_URL || '/'
-      const clean = `${window.location.origin}${base}`
-      window.location.replace(clean)
+    } catch (e) {
+      console.error('signOut failed', e)
     }
   }
 
-  // יצירת קבוצה חדשה – קודם RPC create_group (מוסיף גם חברות owner), ואם אין – נפילה חכמה ל-INSERT רגיל + חברות
+  // יצירת קבוצה חדשה – RPC + נפילת גיבוי
   const createGroup = async () => {
     const name = prompt('שם קבוצה חדש:')?.trim()
     if (!name || !session) return
 
+    // RPC תחילה
     try {
-      // ניסיון ראשון: RPC שמבצע גם יצירת חברות כ-owner
       const rpc = await supabase.rpc('create_group', { p_name: name })
       const row = (rpc as any)?.data as Group | null
       const error = (rpc as any)?.error as { message?: string } | null
@@ -262,11 +276,11 @@ export default function App() {
         return
       }
     } catch {
-      // נמשיך ל-fallback
+      // fallback
     }
 
+    // Fallback: יצירה ידנית + חברות owner
     try {
-      // Fallback: יצירת קבוצה רגילה
       const { data: gRaw, error: e1 } = await supabase
         .from('groups')
         .insert({ name })
@@ -276,7 +290,6 @@ export default function App() {
       if (e1 || !gRaw) throw e1 ?? new Error('יצירת קבוצה נכשלה')
       const g = gRaw as Group
 
-      // הוספת חברות כ-owner – יצליח בזכות RLS (user_id = auth.uid())
       const { error: e2 } = await supabase.from('memberships').insert({
         group_id: g.id,
         user_id: session.user.id,
@@ -298,8 +311,8 @@ export default function App() {
 
   if (!group) {
     return (
-      <div className='h-full flex flex-col items-center justify-center gap-4'>
-        <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
+      <div className='h-full flex flex-col items-center justify-center gap-4 px-4'>
+        <p className='text-gray-600 text-center'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
         <button
           className='rounded-full bg-black text-white px-4 py-2'
           onClick={createGroup}
@@ -312,7 +325,7 @@ export default function App() {
 
   /* ---------- render ---------- */
   return (
-    <div className='max-w-md mx-auto h-full flex flexicol'>
+    <div className='max-w-md mx-auto h-full flex flex-col'>
       {/* header */}
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
@@ -324,13 +337,13 @@ export default function App() {
             setGroup(g)
           }}
         />
-        {/* כפתור קבוצה חדשה – צמוד לסוויצ'ר */}
+        {/* כפתור פלוס לגיבוי */}
         <button
           onClick={createGroup}
-          className='rounded-full bg-black text-white px-3 py-1 text-sm flex items-center gap-1'
+          className='rounded-full p-2 border hover:bg-slate-50'
           title='קבוצה חדשה'
         >
-          <Plus className='w-4 h-4' /> חדשה
+          <Plus className='w-4 h-4' />
         </button>
 
         <div className='flex-1' />
