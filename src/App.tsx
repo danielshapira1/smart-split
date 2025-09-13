@@ -185,9 +185,17 @@ export default function App() {
   const name = prompt('שם קבוצה חדש:');
   if (!name) return;
   try {
-    const newGroup = await createGroupFull(name);
-    setGroups((prev) => [newGroup, ...prev]);
-    setGroup(newGroup);
+    const createGroup = async () => {
+      const name = prompt("שם קבוצה חדש:");
+      if (!name) return;
+      try {
+        const newGroup = await createGroupFull(name);
+        setGroups((prev) => [newGroup, ...prev]);
+        setGroup(newGroup);
+      } catch (err: any) {
+        alert(err?.message ?? "שגיאה ביצירת קבוצה");
+      }
+    };
   } catch (err: any) {
     alert(err?.message ?? 'שגיאה ביצירת קבוצה');
   }
@@ -217,15 +225,9 @@ export default function App() {
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
           groups={groups}
-          current={group?.id ?? null}                    // ← שולחים id
-          onSelect={(gid) => {                           // ← מקבלים id
-            const g = groups.find((x) => x.id === gid) || null
-            setGroup(g)
-          }}
-          onCreate={(g) => {                             // ← אחרי יצירה
-            setGroups((prev) => [g, ...prev])
-            setGroup(g)
-          }}
+          current={group}
+          onSelect={setGroup}
+          onCreated={createGroup}   // ההורה יוצר קבוצה (RPC) ומעדכן state
         />
         <div className='flex-1' />
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
