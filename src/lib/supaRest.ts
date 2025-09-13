@@ -1,3 +1,4 @@
+// src/lib/supaRest.ts
 import { supabase } from "./supabaseClient";
 
 const URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -7,7 +8,7 @@ if (!URL || !KEY) {
   throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY");
 }
 
-// תמיד שולחים apikey + Authorization (access_token אם יש, אחרת anon key)
+// Attach apikey + Authorization (access_token אם יש, אחרת anon key)
 async function authHeader(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   return `Bearer ${session?.access_token ?? KEY}`;
@@ -33,9 +34,9 @@ export type Group = {
 
 export type ExpenseInsert = {
   group_id: string;
-  user_id: string;        // תמיד יהיה auth.uid()
+  user_id: string;        // תמיד auth.uid()
   amount_cents: number;
-  currency: string;       // 'ILS'
+  currency: string;       // לדוגמה 'ILS'
   description?: string;
   category?: string;
   occurred_on?: string;   // YYYY-MM-DD
@@ -43,7 +44,7 @@ export type ExpenseInsert = {
 
 /* ---------- API ---------- */
 
-// יוצר קבוצה ע"י RPC שמחזיר את השורה המלאה
+// יוצר קבוצה ע"י RPC שמחזיר את השורה המלאה (ללא SELECT נוסף)
 export async function createGroupFull(name: string): Promise<Group> {
   const res = await rest(`/rest/v1/rpc/create_group`, {
     method: "POST",
@@ -55,14 +56,34 @@ export async function createGroupFull(name: string): Promise<Group> {
   return g as Group;
 }
 
+// שליפת כל הקבוצות של המשתמש דרך memberships→groups(*)
+export async function fetchGroups(): Promise<Group[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const uid = session?.user?.id;
+  if (!uid) throw new Error("Not authenticated");
+
+  const res = await rest(
+    `/rest/v1/memberships?select=groups(*)&user_id=eq.${uid}`
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json();
+  const groups = (rows ?? [])
+    .map((r: any) => r?.groups)
+    .filter(Boolean);
+  return groups as Group[];
+}
+
 // יוצר הזמנה ומחזיר token (uuid)
-export async function createInvite(groupId: string, role: 'member'|'admin'|'owner' = 'member'): Promise<string> {
+export async function createInvite(
+  groupId: string,
+  role: "member" | "admin" | "owner" = "member"
+): Promise<string> {
   const res = await rest(`/rest/v1/rpc/create_invite`, {
     method: "POST",
     body: JSON.stringify({ p_group_id: groupId, p_role: role }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json(); // uuid string
 }
 
 // מקבל הזמנה לפי token
