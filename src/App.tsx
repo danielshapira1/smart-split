@@ -130,49 +130,53 @@ export default function App() {
 
   /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) + הודעת שגיאה/הצלחה ----- */
   useEffect(() => {
-    if (!session) return
-    const url = new URL(window.location.href)
-    const token = url.searchParams.get('invite')
-    if (!token) return
+    if (!session) return;
 
-    supabase.rpc('accept_invite', { p_token: token }).then(async ({ data, error }) => {
-      try {
-        if (error) {
-          // שגיאה כללית אם ה־RPC נכשל
-          alert('שגיאה בהתחברות לקבוצה')
-          console.error('accept_invite failed:', error?.message)
-          return
-        }
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get('invite');
+    if (!token) return;
 
-        // תרחישי החזרה מה־RPC (מומלץ שיחזיר {status:'ok'|'error', group_name?:string, message?:string})
-        if (data?.status === 'ok') {
-          alert(`הצטרפת לקבוצה: ${data.group_name ?? ''}`)
+    (async () => {
+      const { data, error } = await supabase.rpc('accept_invite', { p_token: token });
 
-          const { data: mems } = await supabase
-            .from('memberships')
-            .select('groups(*)')
-            .eq('user_id', session.user.id)
+      // מסירים את הפרמטר בכל מקרה כדי שלא ירוץ שוב ב-refresh
+      url.searchParams.delete('invite');
+      window.history.replaceState({}, '', url.toString());
 
-          const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
-          setGroups(gs)
-          setGroup(prev => {
-            if (prev && gs.some(g => g.id === prev.id)) return prev
-            return gs[0] ?? null
-          })
-        } else {
-          const msg =
-            data?.message ??
-            `שגיאה בהתחברות לקבוצה${data?.group_name ? `: ${data.group_name}` : ''}`
-          alert(msg)
-          console.warn('accept_invite result:', data)
-        }
-      } finally {
-        // ניקוי הפרמטר מה-URL
-        url.searchParams.delete('invite')
-        window.history.replaceState({}, '', url.toString())
+      if (error) {
+        alert(`שגיאה בהצטרפות לקבוצה: ${error.message}`);
+        return;
       }
-    })
-  }, [session])
+
+      if (!data?.ok) {
+        const g = data?.group_name ? ` "${data.group_name}"` : '';
+        const msg =
+          data?.code === 'INVALID_TOKEN'
+            ? `ההזמנה${g} לא תקפה או שפג תוקפה`
+            : data?.code === 'SERVER_ERROR'
+            ? `אירעה שגיאה בשרת בעת קבלה להזמנה${g}`
+            : `נכשלה ההצטרפות לקבוצה${g}`;
+        alert(msg);
+        return;
+      }
+
+      // הצלחה — נרענן את הקבוצות ונשמור את הקבוצה שנכנסו אליה
+      try {
+        const { data: mems } = await supabase
+          .from('memberships')
+          .select('groups(*)')
+          .eq('user_id', session.user.id);
+
+        const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean);
+        setGroups(gs);
+
+        const joined = gs.find(g => g.id === data.group_id) || gs[0] || null;
+        setGroup(joined);
+      } catch (e) {
+        console.error('refresh groups after accept_invite failed', e);
+      }
+    })();
+  }, [session]);
 
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
