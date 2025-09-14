@@ -58,7 +58,7 @@ export default function App() {
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- profile + groups (NEW) ----- */
+  /* ----- profile + groups ----- */
   useEffect(() => {
     if (!session) return
 
@@ -104,7 +104,7 @@ export default function App() {
     })()
   }, [session])
 
-  /* ----- role for current group (NEW) ----- */
+  /* ----- role for current group ----- */
   useEffect(() => {
     if (!session || !group) {
       setRole('member')
@@ -128,31 +128,48 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) + הודעת שגיאה/הצלחה ----- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
     const token = url.searchParams.get('invite')
     if (!token) return
 
-    supabase.rpc('accept_invite', { p_token: token }).then(async ({ error }) => {
-      if (!error) {
-        const { data: mems } = await supabase
-          .from('memberships')
-          .select('groups(*)')
-          .eq('user_id', session.user.id)
+    supabase.rpc('accept_invite', { p_token: token }).then(async ({ data, error }) => {
+      try {
+        if (error) {
+          // שגיאה כללית אם ה־RPC נכשל
+          alert('שגיאה בהתחברות לקבוצה')
+          console.error('accept_invite failed:', error?.message)
+          return
+        }
 
-        const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
-        setGroups(gs)
-        setGroup(prev => {
-          if (prev && gs.some(g => g.id === prev.id)) return prev
-          return gs[0] ?? null
-        })
+        // תרחישי החזרה מה־RPC (מומלץ שיחזיר {status:'ok'|'error', group_name?:string, message?:string})
+        if (data?.status === 'ok') {
+          alert(`הצטרפת לקבוצה: ${data.group_name ?? ''}`)
 
+          const { data: mems } = await supabase
+            .from('memberships')
+            .select('groups(*)')
+            .eq('user_id', session.user.id)
+
+          const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
+          setGroups(gs)
+          setGroup(prev => {
+            if (prev && gs.some(g => g.id === prev.id)) return prev
+            return gs[0] ?? null
+          })
+        } else {
+          const msg =
+            data?.message ??
+            `שגיאה בהתחברות לקבוצה${data?.group_name ? `: ${data.group_name}` : ''}`
+          alert(msg)
+          console.warn('accept_invite result:', data)
+        }
+      } finally {
+        // ניקוי הפרמטר מה-URL
         url.searchParams.delete('invite')
         window.history.replaceState({}, '', url.toString())
-      } else {
-        console.error('accept_invite failed:', error?.message)
       }
     })
   }, [session])
@@ -215,6 +232,12 @@ export default function App() {
     profile?.display_name ||
     profile?.email ||
     (session?.user?.email ?? 'משתמש')
+
+  // שם מלא לברכה (מוגבל תצוגה, עם title ל-hover)
+  const fullName = useMemo(
+    () => profile?.display_name || profile?.email || session?.user?.email || '',
+    [profile, session?.user?.email]
+  )
 
   /* ----- actions ----- */
   const signOut = async () => {
@@ -299,7 +322,19 @@ export default function App() {
             setGroup(g)
           }}
         />
-        <div className='flex-1' />
+
+        {/* אזור הברכה: שם מקוצר עם ... ו־hover (title). לחיצה תציג alert עם השם המלא */}
+        <div className='flex-1 flex justify-end pr-2'>
+          <button
+            type='button'
+            title={fullName}
+            onClick={() => fullName && alert(fullName)}
+            className='max-w-[220px] truncate text-sm text-gray-700 text-right'
+          >
+            {fullName ? <>שלום {fullName}</> : 'שלום'}
+          </button>
+        </div>
+
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
