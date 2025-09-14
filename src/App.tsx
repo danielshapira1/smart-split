@@ -137,7 +137,7 @@ export default function App() {
     if (!token) return;
 
     (async () => {
-      const { data, error } = await supabase.rpc('accept_invite', { p_token: token });
+      const { data, error } = await supabase.rpc('join_group_token', { p_token: token });
 
       // מסירים את הפרמטר בכל מקרה כדי שלא ירוץ שוב ב-refresh
       url.searchParams.delete('invite');
