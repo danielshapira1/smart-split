@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { LogOut, Plus } from 'lucide-react'
 
@@ -58,51 +58,61 @@ export default function App() {
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- profile + groups ----- */
+  // טען פרופיל (לשם מציג המשלם)
   useEffect(() => {
     if (!session) return
-
     ;(async () => {
-      const uid = session.user.id
-
-      // פרופיל
-      const { data: prof } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', uid)
+        .eq('id', session.user.id)
         .maybeSingle<Profile>()
-      setProfile(prof ?? null)
+      setProfile(data ?? null)
+    })()
+  }, [session])
 
-      // כל החברויות עם group מלא
+  /**
+   * טוען מחדש את רשימת הקבוצות של המשתמש ומעדכן current group.
+   * preferGroupId - אם עבר ID, ננסה לבחור אותו כקבוצה פעילה.
+   */
+  const refreshGroups = useCallback(
+    async (preferGroupId?: string) => {
+      if (!session?.user?.id) return
+
       const { data: mems, error } = await supabase
         .from('memberships')
-        .select(`
-          role,
-          groups:groups(*)
-        `)
-        .eq('user_id', uid)
+        .select('groups(*)')
+        .eq('user_id', session.user.id)
 
       if (error) {
-        console.error('load memberships failed:', error.message)
+        console.error('refreshGroups failed:', error.message)
         setGroups([])
         setGroup(null)
-        setRole('member')
         return
       }
 
-      const gs = (mems ?? [])
+      const gs: Group[] = (mems ?? [])
         .map((m: any) => m.groups)
-        .filter(Boolean) as Group[]
+        .filter(Boolean)
 
       setGroups(gs)
 
-      // שומר קבוצה קיימת אם עדיין קיימת, אחרת הראשונה, ואם אין – null
       setGroup(prev => {
+        if (preferGroupId) {
+          const wanted = gs.find(g => g.id === preferGroupId)
+          if (wanted) return wanted
+        }
         if (prev && gs.some(g => g.id === prev.id)) return prev
         return gs[0] ?? null
       })
-    })()
-  }, [session])
+    },
+    [session?.user?.id]
+  )
+
+  // טעינה ראשונית של קבוצות כשיש session
+  useEffect(() => {
+    if (session) refreshGroups()
+  }, [session, refreshGroups])
 
   /* ----- role for current group ----- */
   useEffect(() => {
@@ -128,55 +138,52 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) + הודעת שגיאה/הצלחה ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) ----- */
   useEffect(() => {
-    if (!session) return;
+    if (!session) return
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('invite')
+    if (!token) return
 
-    const url = new URL(window.location.href);
-    const token = url.searchParams.get('invite');
-    if (!token) return;
-
-    (async () => {
-      const { data, error } = await supabase.rpc('join_group_token', { p_token: token });
-
-      // מסירים את הפרמטר בכל מקרה כדי שלא ירוץ שוב ב-refresh
-      url.searchParams.delete('invite');
-      window.history.replaceState({}, '', url.toString());
-
-      if (error) {
-        alert(`שגיאה בהצטרפות לקבוצה: ${error.message}`);
-        return;
-      }
-
-      if (!data?.ok) {
-        const g = data?.group_name ? ` "${data.group_name}"` : '';
-        const msg =
-          data?.code === 'INVALID_TOKEN'
-            ? `ההזמנה${g} לא תקפה או שפג תוקפה`
-            : data?.code === 'SERVER_ERROR'
-            ? `אירעה שגיאה בשרת בעת קבלה להזמנה${g}`
-            : `נכשלה ההצטרפות לקבוצה${g}`;
-        alert(msg);
-        return;
-      }
-
-      // הצלחה — נרענן את הקבוצות ונשמור את הקבוצה שנכנסו אליה
+    ;(async () => {
+      // ננסה להביא את שם הקבוצה לטובת הודעת שגיאה ידידותית
+      let groupName: string | undefined
+      let groupIdCandidate: string | undefined
       try {
-        const { data: mems } = await supabase
-          .from('memberships')
-          .select('groups(*)')
-          .eq('user_id', session.user.id);
-
-        const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean);
-        setGroups(gs);
-
-        const joined = gs.find(g => g.id === data.group_id) || gs[0] || null;
-        setGroup(joined);
-      } catch (e) {
-        console.error('refresh groups after accept_invite failed', e);
+        const { data: inv } = await supabase
+          .from('invites')
+          .select('group_id, groups(name)')
+          .eq('token', token)
+          .maybeSingle()
+        groupName = (inv as any)?.groups?.name
+        groupIdCandidate = (inv as any)?.group_id
+      } catch {
+        // מתעלמים – לא חובה לשם השגיאה
       }
-    })();
-  }, [session]);
+
+      // ניסיון עיקרי
+      let joinedGroupId: string | undefined
+      const { data: d1, error: e1 } = await supabase.rpc('accept_invite', { p_token: token })
+
+      if (!e1) {
+        joinedGroupId = (d1 as any)?.group_id ?? groupIdCandidate
+      } else {
+        // פולבאק אופציונלי אם קיים אצלך RPC נוסף
+        const { data: d2, error: e2 } = await supabase.rpc('join_group_token' as any, { p_token: token } as any)
+        if (!e2) joinedGroupId = (d2 as any)?.group_id ?? groupIdCandidate
+        if (e1 && e2) {
+          console.error('accept_invite & fallback failed:', e1.message, e2.message)
+          alert(`שגיאה בהצטרפות לקבוצה${groupName ? `: "${groupName}"` : ''}`)
+          return
+        }
+      }
+
+      await refreshGroups(joinedGroupId)
+
+      url.searchParams.delete('invite')
+      window.history.replaceState({}, '', url.toString())
+    })()
+  }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
@@ -237,12 +244,6 @@ export default function App() {
     profile?.email ||
     (session?.user?.email ?? 'משתמש')
 
-  // שם מלא לברכה (מוגבל תצוגה, עם title ל-hover)
-  const fullName = useMemo(
-    () => profile?.display_name || profile?.email || session?.user?.email || '',
-    [profile, session?.user?.email]
-  )
-
   /* ----- actions ----- */
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -259,9 +260,7 @@ export default function App() {
       const error = (rpc as any)?.error as { message?: string } | null
 
       if (!error && row) {
-        setGroups((prev) => [row, ...prev])
-        setGroup(row)
-        setRole('owner')
+        await refreshGroups(row.id)
         return
       }
     } catch {
@@ -283,12 +282,9 @@ export default function App() {
         user_id: session.user.id,
         role: 'owner',
       })
-
       if (e2) console.warn('הוספת חברות נכשלה:', e2.message)
 
-      setGroups((prev) => [g, ...prev])
-      setGroup(g)
-      setRole('owner')
+      await refreshGroups(g.id)
     } catch (err: any) {
       console.error('[createGroup] error', err)
       alert(err?.message ?? 'יצירת קבוצה נכשלה')
@@ -321,24 +317,11 @@ export default function App() {
           groups={groups}
           current={group}
           onSelect={setGroup}
-          onCreated={(g) => {
-            setGroups((prev) => [g, ...prev])
-            setGroup(g)
+          onCreated={async (g) => {
+            await refreshGroups(g.id)
           }}
         />
-
-        {/* אזור הברכה: שם מקוצר עם ... ו־hover (title). לחיצה תציג alert עם השם המלא */}
-        <div className='flex-1 flex justify-end pr-2'>
-          <button
-            type='button'
-            title={fullName}
-            onClick={() => fullName && alert(fullName)}
-            className='max-w-[220px] truncate text-sm text-gray-700 text-right'
-          >
-            {fullName ? <>שלום {fullName}</> : 'שלום'}
-          </button>
-        </div>
-
+        <div className='flex-1' />
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
