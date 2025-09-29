@@ -445,3 +445,51 @@ end;
 $$;
 
 grant execute on function public.create_group(text) to anon, authenticated;
+
+-- פונקציית הצטרפות שמחזירה תשובה מפורטת
+create or replace function public.join_group_token(p_token uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inv   public.invites%rowtype;
+  v_gname text;
+begin
+  -- מאתרים הזמנה תקפה
+  select * into v_inv
+  from public.invites
+  where token = p_token
+    and used_by is null
+    and expires_at > now();
+
+  if not found then
+    return jsonb_build_object('joined', false, 'reason', 'invalid_or_expired');
+  end if;
+
+  -- מצרפים כחבר (Idempotent)
+  insert into public.memberships (group_id, user_id, role)
+  values (v_inv.group_id, auth.uid(), v_inv.invited_role)
+  on conflict (group_id, user_id) do nothing;
+
+  -- מסמנים שהוזמן נוצל
+  update public.invites
+     set used_by = auth.uid(), used_at = now()
+   where token = p_token and used_by is null;
+
+  select name into v_gname from public.groups where id = v_inv.group_id;
+
+  return jsonb_build_object(
+    'joined', true,
+    'group_id', v_inv.group_id,
+    'group_name', v_gname
+  );
+
+exception when others then
+  -- לא לבלוע בשקט – נחזיר reason מפורט לקליינט
+  return jsonb_build_object('joined', false, 'reason', sqlerrm);
+end $$;
+
+grant execute on function public.join_group_token(uuid) to anon, authenticated;
+
