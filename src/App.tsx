@@ -58,7 +58,40 @@ export default function App() {
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- profile + groups ----- */
+  /* ----- helper: refresh groups list ----- */
+  const refreshGroups = async (preferGroupId?: string) => {
+    if (!session) return
+    const uid = session.user.id
+
+    const { data: mems, error } = await supabase
+      .from('memberships')
+      .select(`groups(*)`)
+      .eq('user_id', uid)
+
+    if (error) {
+      console.error('load memberships failed:', error.message)
+      setGroups([])
+      setGroup(null)
+      return
+    }
+
+    const gs = (mems ?? [])
+      .map((m: any) => m.groups)
+      .filter(Boolean) as Group[]
+
+    setGroups(gs)
+
+    // שמירת קבוצה נוכחית אם קיימת; אחרת נעדיף קבוצה ספציפית אם ביקשו; אחרת הראשונה
+    setGroup(prev => {
+      if (prev && gs.some(g => g.id === prev.id)) return prev
+      if (preferGroupId && gs.some(g => g.id === preferGroupId)) {
+        return gs.find(g => g.id === preferGroupId) ?? gs[0] ?? null
+      }
+      return gs[0] ?? null
+    })
+  }
+
+  /* ----- profile + initial groups ----- */
   useEffect(() => {
     if (!session) return
 
@@ -73,35 +106,12 @@ export default function App() {
         .maybeSingle<Profile>()
       setProfile(prof ?? null)
 
-      // כל החברויות עם group מלא
-      const { data: mems, error } = await supabase
-        .from('memberships')
-        .select(`role, groups:groups(*)`)
-        .eq('user_id', uid)
-
-      if (error) {
-        console.error('load memberships failed:', error.message)
-        setGroups([])
-        setGroup(null)
-        setRole('member')
-        return
-      }
-
-      const gs = (mems ?? [])
-        .map((m: any) => m.groups)
-        .filter(Boolean) as Group[]
-
-      setGroups(gs)
-
-      // שומר קבוצה קיימת אם עדיין קיימת, אחרת הראשונה, ואם אין – null
-      setGroup(prev => {
-        if (prev && gs.some(g => g.id === prev.id)) return prev
-        return gs[0] ?? null
-      })
+      // קבוצות
+      await refreshGroups()
     })()
   }, [session])
 
-  /* ----- role for current group ----- */
+  /* ----- role for current group + הודעת שגיאה ידידותית ----- */
   useEffect(() => {
     if (!session || !group) {
       setRole('member')
@@ -118,6 +128,8 @@ export default function App() {
 
       if (error) {
         console.warn('load role failed:', error.message)
+        // בקשתך: שגיאה עם שם הקבוצה
+        alert(`שגיאה בהתחברות לקבוצה${group?.name ? ` ${group.name}` : ''}`)
         setRole('member')
         return
       }
@@ -125,56 +137,7 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ------------------------------------------------------------------
-     פונקציה לרענן קבוצות (מופעלת אחרי הצטרפות/קבלה מה-URL)
-  ------------------------------------------------------------------ */
-  // helper: טוען קבוצות מחדש ובוחר את הנכונה (אם התקבלה)
-  async function refreshGroups(targetGroupId?: string) {
-    const { data: mems } = await supabase
-      .from('memberships')
-      .select('groups(*)')
-      .eq('user_id', session!.user.id)
-
-    const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
-    setGroups(gs)
-
-    const joined = targetGroupId
-      ? (gs.find(g => g.id === targetGroupId) || gs[0] || null)
-      : (group && gs.find(g => g.id === group.id)) || gs[0] || null
-
-    setGroup(joined)
-  }
-
-  useEffect(() => {
-    if (!session) return
-
-    const url = new URL(window.location.href)
-    const token = url.searchParams.get('invite')
-    if (!token) return
-
-    ;(async () => {
-      const { data, error } = await supabase.rpc('join_group_token', { p_token: token })
-      if (error) {
-        alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
-        return
-      }
-
-      if (!data?.joined) {
-        alert(`שגיאה בהצטרפות לקבוצה${data?.group_name ? ' ' + data.group_name : ''}${data?.reason ? ': ' + data.reason : ''}`)
-        return
-      }
-
-      await refreshGroups(data.group_id)
-
-      // הסר את הפרמטר מה-URL כדי לא לנסות שוב
-      url.searchParams.delete('invite')
-      window.history.replaceState({}, '', url.toString())
-    })()
-    // אל תוסיף תלות ב-url כדי שלא יופעל שוב
-  }, [session])
-
-
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=)  ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=) דרך accept_invite ----- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
@@ -182,25 +145,19 @@ export default function App() {
     if (!token) return
 
     ;(async () => {
-      // שימוש ב-RPC החדש שמחזיר JSON ברור
-      const { data, error } = await supabase.rpc('join_group_token', { p_token: token }) as {
-        data: { joined: boolean; group_id?: string; group_name?: string; reason?: string } | null
-        error: { message: string } | null
-      }
-
+      const { error } = await supabase.rpc('accept_invite', { p_token: token as any })
       if (error) {
-        alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
-      } else if (!data?.joined) {
-        alert(`שגיאה בהצטרפות לקבוצה${data?.group_name ? ' ' + data.group_name : ''}: ${data?.reason ?? ''}`)
+        // מסר כללי – אין לנו שם קבוצה כאן
+        alert('שגיאה בהתחברות לקבוצה: ' + (error.message || ''))
       } else {
-        await refreshGroups(data.group_id)
+        // רענון רשימת הקבוצות; אין לנו group_id חזרה – נבחר את הראשונה
+        await refreshGroups()
       }
 
-      // הסרת הפרמטר מה-URL ללא רענון
+      // הסרת הפרמטר כדי למנוע ניסיון הצטרפות נוסף ברענון
       url.searchParams.delete('invite')
       window.history.replaceState({}, '', url.toString())
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session])
 
   /* ----- realtime expenses ----- */
@@ -310,7 +267,8 @@ export default function App() {
       setRole('owner')
     } catch (err: any) {
       console.error('[createGroup] error', err)
-      alert(err?.message ?? 'יצירת קבוצה נכשלה')
+      // הודעה ברורה – אם נכשל, נציג גם את שם הקבוצה שניסו ליצור
+      alert(`שגיאה בהתחברות לקבוצה${name ? ` ${name}` : ''}: ${err?.message ?? ''}`)
     }
   }
 
