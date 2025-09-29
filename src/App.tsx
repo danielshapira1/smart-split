@@ -128,24 +128,51 @@ export default function App() {
   /* ------------------------------------------------------------------
      פונקציה לרענן קבוצות (מופעלת אחרי הצטרפות/קבלה מה-URL)
   ------------------------------------------------------------------ */
-  async function refreshGroups(joinedGroupId?: string) {
-    if (!session) return
+  // helper: טוען קבוצות מחדש ובוחר את הנכונה (אם התקבלה)
+  async function refreshGroups(targetGroupId?: string) {
     const { data: mems } = await supabase
       .from('memberships')
       .select('groups(*)')
-      .eq('user_id', session.user.id)
+      .eq('user_id', session!.user.id)
 
     const gs: Group[] = (mems || []).map((m: any) => m.groups).filter(Boolean)
     setGroups(gs)
 
-    // אם התקבלה קבוצה ספציפית – נעבור אליה; אחרת נשמור על הנוכחית/ניקח ראשונה
-    const next =
-      (joinedGroupId && gs.find(g => g.id === joinedGroupId)) ||
-      (group && gs.find(g => g.id === group.id)) ||
-      gs[0] ||
-      null
-    setGroup(next)
+    const joined = targetGroupId
+      ? (gs.find(g => g.id === targetGroupId) || gs[0] || null)
+      : (group && gs.find(g => g.id === group.id)) || gs[0] || null
+
+    setGroup(joined)
   }
+
+  useEffect(() => {
+    if (!session) return
+
+    const url = new URL(window.location.href)
+    const token = url.searchParams.get('invite')
+    if (!token) return
+
+    ;(async () => {
+      const { data, error } = await supabase.rpc('join_group_token', { p_token: token })
+      if (error) {
+        alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
+        return
+      }
+
+      if (!data?.joined) {
+        alert(`שגיאה בהצטרפות לקבוצה${data?.group_name ? ' ' + data.group_name : ''}${data?.reason ? ': ' + data.reason : ''}`)
+        return
+      }
+
+      await refreshGroups(data.group_id)
+
+      // הסר את הפרמטר מה-URL כדי לא לנסות שוב
+      url.searchParams.delete('invite')
+      window.history.replaceState({}, '', url.toString())
+    })()
+    // אל תוסיף תלות ב-url כדי שלא יופעל שוב
+  }, [session])
+
 
   /* ----- קבלה מהירה של הזמנה מה-URL (?invite=)  ----- */
   useEffect(() => {
