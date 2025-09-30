@@ -45,6 +45,12 @@ export default function App() {
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
+  // --- ברכה לשם משתמש (זמין לכל המצבים) ---
+  const greetName = useMemo(
+    () => profile?.display_name || session?.user?.email || 'אורח',
+    [profile?.display_name, session?.user?.email]
+  )
+
   /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
@@ -64,7 +70,7 @@ export default function App() {
       if (!session) return
       const uid = session.user.id
 
-      // טעינת קבוצות של המשתמש. ננסה דרך JOIN על memberships (עמיד ל-RLS/סכמות).
+      // נסיון עיקרי: JOIN על memberships
       let gs: Group[] = []
       try {
         const { data, error } = await supabase
@@ -82,7 +88,7 @@ export default function App() {
         if (error) throw error
         gs = (data ?? []) as any as Group[]
       } catch {
-        // fallback ישן: דרך טבלת החברות (אם מוגדר ֿselect נכון)
+        // fallback: דרך memberships
         const { data: mems } = await supabase
           .from('memberships')
           .select('groups(*)')
@@ -211,7 +217,7 @@ export default function App() {
 
       const ms: Member[] = (data ?? []).map((m: any) => ({
         user_id: m.user_id,
-        uid: m.user_id, // תאימות אם קיימים שימושים היכן שהוא – לא חובה
+        uid: m.user_id,
         name: m.profiles?.display_name || m.profiles?.email || m.user_id,
       }))
 
@@ -244,7 +250,6 @@ export default function App() {
     if (!group) return ''
     if (filtered.length === 0) return 'אין הוצאות להצגה'
 
-    // חלוקה שווה בין כל חברי הקבוצה
     const n = Math.max(1, members.length)
     const totalCents = filtered.reduce((s, e) => s + (e.amount_cents ?? 0), 0)
     const myPaid = filtered
@@ -279,7 +284,7 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
-  // יצירת קבוצה חדשה – RPC ואם לא מצליח נופלים ל־INSERT רגיל + חברות
+  // יצירת קבוצה חדשה
   const createGroup = async () => {
     const name = prompt('שם קבוצה חדש:')?.trim()
     if (!name || !session) return
@@ -295,9 +300,7 @@ export default function App() {
         setRole('owner')
         return
       }
-    } catch {
-      // נמשיך ל-fallback
-    }
+    } catch {}
 
     try {
       const { data: gRaw, error: e1 } = await supabase
@@ -329,21 +332,34 @@ export default function App() {
   /* ----- guards ----- */
   if (!session) return <AuthScreen />
 
+  // === מסך ללא קבוצה: עם ברכה למעלה ===
   if (!group) {
     return (
-      <div className='h-full flex flex-col items-center justify-center gap-4'>
-        <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
-        <button
-          className='rounded-full bg-black text-white px-4 py-2'
-          onClick={createGroup}
-        >
-          צור קבוצה חדשה
-        </button>
+      <div className='h-full flex flex-col'>
+        <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
+          <div className='flex-1' />
+          <div className='ms-auto me-2 text-sm text-gray-700'>שלום, {greetName}</div>
+          <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
+            <LogOut className='w-4 h-4' /> יציאה
+          </button>
+        </header>
+
+        <div className='flex-1 flex flex-col items-center justify-center gap-4 px-4'>
+          <p className='text-gray-600 text-center'>
+            אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.
+          </p>
+          <button
+            className='rounded-full bg-black text-white px-4 py-2'
+            onClick={createGroup}
+          >
+            צור קבוצה חדשה
+          </button>
+        </div>
       </div>
     )
   }
 
-  /* ---------- render ---------- */
+  /* ---------- render with group ---------- */
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
       {/* header */}
@@ -357,7 +373,7 @@ export default function App() {
             setGroup(g)
           }}
         />
-        <div className='flex-1' />
+        <div className='ms-auto me-2 text-sm text-gray-700'>שלום, {greetName}</div>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
@@ -452,9 +468,7 @@ export default function App() {
       {tab === 'expenses' && (
         <footer className='sticky bottom-0 bg-white border-t p-3'>
           <div className='flex items-center justify-between'>
-            <div className='text-gray-600 text-sm'>
-              {/* אפשר להשאיר ריק/מידע אחר – הסיכום עבר לשורה העליונה */}
-            </div>
+            <div className='text-gray-600 text-sm' />
             <button
               onClick={() => setShowForm(true)}
               className={clsx(
