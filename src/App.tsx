@@ -26,6 +26,13 @@ export type Expense = {
   payer_name?: string
 }
 
+type AcceptResult = {
+  joined: boolean
+  already_member: boolean | null
+  group_id: string
+  group_name: string
+}
+
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
 
 /* ---------- App ---------- */
@@ -41,6 +48,9 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
+
+  // הודעת פלאש קצרה
+  const [flash, setFlash] = useState<string | null>(null)
 
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
@@ -120,11 +130,11 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN)  ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN / ?token=TOKEN) ----- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
-    const token = url.searchParams.get('invite')
+    const token = url.searchParams.get('invite') || url.searchParams.get('token')
     if (!token) return
 
     ;(async () => {
@@ -132,14 +142,37 @@ export default function App() {
       if (error) {
         alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
       } else {
-        // data: { joined, already_member, group_id, group_name }
-        await refreshGroups(data?.group_id ?? null)
+        const res = (data || {}) as Partial<AcceptResult>
+        await refreshGroups(res.group_id ?? null)
+
+        if (res.group_name) {
+          setFlash(res.already_member ? `את/ה כבר חבר/ה ב"${res.group_name}"` : `הצטרפת ל"${res.group_name}" בהצלחה`)
+          window.setTimeout(() => setFlash(null), 3000)
+        }
       }
 
-      // הסרת הפרמטר מה-URL כדי לא לחזור על הפעולה ברענון
+      // הסרת הפרמטרים מה-URL כדי לא לחזור על הפעולה ברענון
       url.searchParams.delete('invite')
+      url.searchParams.delete('token')
       window.history.replaceState({}, '', url.toString())
     })()
+  }, [session, refreshGroups])
+
+  /* ----- realtime: רענון קבוצות כשחברות של המשתמש משתנה ----- */
+  useEffect(() => {
+    if (!session) return
+    const ch = supabase
+      .channel('rt-memberships-self')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${session.user.id}` },
+        () => refreshGroups()
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(ch)
+    }
   }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
@@ -220,6 +253,8 @@ export default function App() {
         setGroups((prev) => [row, ...prev])
         setGroup(row)
         setRole('owner')
+        setFlash(`נוצרה קבוצה "${row.name}"`)
+        window.setTimeout(() => setFlash(null), 2500)
         return
       }
     } catch {
@@ -247,6 +282,8 @@ export default function App() {
       setGroups((prev) => [g, ...prev])
       setGroup(g)
       setRole('owner')
+      setFlash(`נוצרה קבוצה "${g.name}"`)
+      window.setTimeout(() => setFlash(null), 2500)
     } catch (err: any) {
       console.error('[createGroup] error', err)
       alert(err?.message ?? 'יצירת קבוצה נכשלה')
@@ -290,6 +327,13 @@ export default function App() {
           <LogOut className='w-4 h-4' /> יציאה
         </button>
       </header>
+
+      {/* flash message */}
+      {flash && (
+        <div className='px-4 py-2 bg-emerald-50 text-emerald-700 text-sm'>
+          {flash}
+        </div>
+      )}
 
       {/* top summary line */}
       <div className='px-4 pt-2 text-sm text-gray-600'>
