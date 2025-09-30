@@ -1,4 +1,3 @@
-// App.tsx
 import React, { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { LogOut, Plus } from 'lucide-react'
@@ -28,41 +27,6 @@ export type Expense = {
 }
 
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
-
-/* ---------- עזר: טעינת קבוצות למשתמש + יצירת שם יוצר ללא JOIN ---------- */
-async function listMyGroupsWithCreatorName(uid: string) {
-  // 1) מושכים את הקבוצות דרך החברות של המשתמש
-  const { data: mems, error } = await supabase
-    .from('memberships')
-    .select('groups ( id, name, created_by, created_at )')
-    .eq('user_id', uid)
-
-  if (error) throw error
-
-  const groups: (Group & { created_by?: string })[] =
-    (mems ?? []).map((m: any) => m.groups).filter(Boolean)
-
-  if (groups.length === 0) return { groups: [], creators: {} as Record<string, string> }
-
-  // 2) מביאים שמות מה-profiles לפי created_by
-  const creatorIds = Array.from(new Set(groups.map(g => g.created_by).filter(Boolean))) as string[]
-  const creators: Record<string, string> = {}
-
-  if (creatorIds.length) {
-    const { data: profs, error: e2 } = await supabase
-      .from('profiles')
-      .select('id, display_name, email')
-      .in('id', creatorIds)
-
-    if (!e2 && profs) {
-      for (const p of profs) {
-        creators[p.id] = p.display_name || p.email || p.id
-      }
-    }
-  }
-
-  return { groups, creators }
-}
 
 /* ---------- App ---------- */
 export default function App() {
@@ -100,24 +64,43 @@ export default function App() {
       if (!session) return
       const uid = session.user.id
 
+      // טעינת קבוצות של המשתמש. ננסה דרך JOIN על memberships (עמיד ל-RLS/סכמות).
+      let gs: Group[] = []
       try {
-        const { groups: gs } = await listMyGroupsWithCreatorName(uid)
-        setGroups(gs as Group[])
+        const { data, error } = await supabase
+          .from('groups')
+          .select(`
+            id,
+            name,
+            created_by,
+            created_at,
+            creator:profiles!groups_created_by_fkey(display_name,email),
+            memberships!inner(user_id)
+          `)
+          .eq('memberships.user_id', uid)
 
-        setGroup(prev => {
-          const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
-          return gs.find(g => g.id === pickId) ?? gs[0] ?? null
-        })
-      } catch (err: any) {
-        console.warn('refreshGroups failed:', err?.message || err)
-        setGroups([])
-        setGroup(null)
+        if (error) throw error
+        gs = (data ?? []) as any as Group[]
+      } catch {
+        // fallback ישן: דרך טבלת החברות (אם מוגדר ֿselect נכון)
+        const { data: mems } = await supabase
+          .from('memberships')
+          .select('groups(*)')
+          .eq('user_id', uid)
+
+        gs = (mems ?? []).map((m: any) => m.groups).filter(Boolean)
       }
+
+      setGroups(gs)
+      setGroup(prev => {
+        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
+        return gs.find(g => g.id === pickId) ?? gs[0] ?? null
+      })
     },
     [session]
   )
 
-  /* ----- profile + groups (טעינה ראשונית) ----- */
+  /* ----- profile + groups ----- */
   useEffect(() => {
     if (!session) return
     ;(async () => {
@@ -133,35 +116,22 @@ export default function App() {
     })()
   }, [session, refreshGroups])
 
-  /* ----- Realtime: כל שינוי ב-memberships של המשתמש מרענן קבוצות ----- */
+  /* ----- Realtime על memberships של המשתמש ----- */
   useEffect(() => {
     if (!session) return
     const uid = session.user.id
 
-    const channel = supabase
-      .channel(`mships-${uid}`)
+    const ch = supabase
+      .channel(`mems:${uid}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'memberships',
-          filter: `user_id=eq.${uid}`,
-        },
-        () => {
-          // כל שינוי בחברות → לרענן את רשימת הקבוצות
-          refreshGroups()
-        }
+        { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${uid}` },
+        () => refreshGroups(null)
       )
-      .subscribe((status) => {
-        // אופציונלי: לוג
-        // console.log('memberships realtime status:', status)
-      })
+      .subscribe()
 
     return () => {
-      try {
-        supabase.removeChannel(channel)
-      } catch {}
+      supabase.removeChannel(ch)
     }
   }, [session, refreshGroups])
 
@@ -213,7 +183,7 @@ export default function App() {
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group ----- */
+  /* ----- load members for current group (uses explicit FK alias) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -240,8 +210,8 @@ export default function App() {
       }
 
       const ms: Member[] = (data ?? []).map((m: any) => ({
-        uid: m.user_id,
         user_id: m.user_id,
+        uid: m.user_id, // תאימות אם קיימים שימושים היכן שהוא – לא חובה
         name: m.profiles?.display_name || m.profiles?.email || m.user_id,
       }))
 
@@ -249,7 +219,7 @@ export default function App() {
     })()
   }, [group])
 
-  /* ----- filters + totals ----- */
+  /* ----- filters ----- */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return expenses.filter((e) => {
@@ -259,10 +229,45 @@ export default function App() {
     })
   }, [expenses, search, category])
 
-  const total = useMemo(
-    () => filtered.reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
-    [filtered]
+  /* ----- סיכום למעלה: “מי חייב למי” לזוג, אחרת טקסט כללי ----- */
+  const meId = session?.user?.id ?? ''
+  const otherMember = useMemo(
+    () => members.find(m => m.user_id !== meId),
+    [members, meId]
   )
+  const otherName = useMemo(() => {
+    if (!otherMember) return 'המשתתף/ת השני/ה'
+    return otherMember.name || otherMember.user_id
+  }, [otherMember])
+
+  const summaryText = useMemo(() => {
+    if (!group) return ''
+    if (filtered.length === 0) return 'אין הוצאות להצגה'
+
+    // חלוקה שווה בין כל חברי הקבוצה
+    const n = Math.max(1, members.length)
+    const totalCents = filtered.reduce((s, e) => s + (e.amount_cents ?? 0), 0)
+    const myPaid = filtered
+      .filter(e => e.user_id === meId)
+      .reduce((s, e) => s + (e.amount_cents ?? 0), 0)
+
+    const myShare = Math.round(totalCents / n)
+    const netCents = myShare - myPaid // >0 אני חייב; <0 חייבים לי
+    const abs = Math.abs(netCents) / 100
+
+    const isPair = members.length === 2
+    if (netCents > 0) {
+      return isPair
+        ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}`
+        : `את/ה חייב/ת לקבוצה ₪${abs.toFixed(2)}`
+    }
+    if (netCents < 0) {
+      return isPair
+        ? `${otherName} חייב/ת לך ₪${abs.toFixed(2)}`
+        : `הקבוצה חייבת לך ₪${abs.toFixed(2)}`
+    }
+    return 'מאוזנים'
+  }, [filtered, members, meId, group, otherName])
 
   const currentPayerName =
     profile?.display_name ||
@@ -328,32 +333,6 @@ export default function App() {
     return (
       <div className='h-full flex flex-col items-center justify-center gap-4'>
         <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
-
-        {/* כפתור בדיקה: באילו קבוצות אני נמצא כעת */}
-        <div className='mt-2'>
-          <button
-            onClick={async () => {
-              if (!session) return
-              try {
-                const { groups: gs, creators } = await listMyGroupsWithCreatorName(session.user.id)
-                if (!gs.length) {
-                  alert('לא נמצאו קבוצות במערכת למשתמש הנוכחי.')
-                  return
-                }
-                const lines = gs.map(g =>
-                  `${g.name} (נוצרה ע"י ${creators[g.created_by as string] ?? g.created_by ?? 'לא ידוע'})`
-                )
-                alert('קבוצות שמורות למשתמש:\n' + lines.join('\n'))
-              } catch (e: any) {
-                alert('שגיאה בבדיקת חברות: ' + (e?.message || e))
-              }
-            }}
-            className='rounded-xl border px-4 py-2 text-sm'
-          >
-            בדיקה: באילו קבוצות אני נמצא?
-          </button>
-        </div>
-
         <button
           className='rounded-full bg-black text-white px-4 py-2'
           onClick={createGroup}
@@ -387,7 +366,7 @@ export default function App() {
 
       {/* top summary line */}
       <div className='px-4 pt-2 text-sm text-gray-600'>
-        {filtered.length > 0 ? `סה"כ נבחר: ₪${(total / 100).toFixed(2)}` : 'אין תוצאות להצגה'}
+        {summaryText}
       </div>
 
       {/* search + filter */}
@@ -474,7 +453,7 @@ export default function App() {
         <footer className='sticky bottom-0 bg-white border-t p-3'>
           <div className='flex items-center justify-between'>
             <div className='text-gray-600 text-sm'>
-              סה"כ: <span className='font-semibold'>₪{(total / 100).toFixed(2)}</span>
+              {/* אפשר להשאיר ריק/מידע אחר – הסיכום עבר לשורה העליונה */}
             </div>
             <button
               onClick={() => setShowForm(true)}
