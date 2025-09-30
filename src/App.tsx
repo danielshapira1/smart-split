@@ -45,10 +45,6 @@ export default function App() {
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
-  // --- Debug UI state: מפה של יוצרי קבוצות + פתיחה/סגירה של הפנל ---
-  const [creatorById, setCreatorById] = useState<Record<string, { name: string }>>({})
-  const [showMembershipDebug, setShowMembershipDebug] = useState(false)
-
   /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
@@ -62,84 +58,64 @@ export default function App() {
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- helper: ריענון קבוצות + טעינת יוצרי קבוצות ----- */
+  /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד ----- */
   const refreshGroups = React.useCallback(
     async (targetGroupId?: string | null) => {
       if (!session) return
       const uid = session.user.id
 
-      // 1) שלוף את כל ה-group_id של המשתמש
-      const { data: memRows, error: memErr } = await supabase
-        .from('memberships')
-        .select('group_id')
-        .eq('user_id', uid)
+      // דרך יציבה: שולפים ישירות מקבוצות עם inner-join לחברות
+      let gs: Group[] = []
+      try {
+        const { data: rows, error } = await supabase
+          .from('groups')
+          .select(`
+            id,
+            name,
+            created_by,
+            created_at,
+            creator:profiles!groups_created_by_fkey ( display_name, email ),
+            memberships!inner ( user_id )
+          `)
+          .eq('memberships.user_id', uid)
 
-      if (memErr) {
-        console.warn('[refreshGroups] memberships:', memErr.message)
-        setGroups([])
-        setGroup(null)
-        setCreatorById({})
-        return
-      }
-
-      const ids = Array.from(
-        new Set((memRows ?? []).map((m: any) => m.group_id).filter(Boolean))
-      )
-
-      if (ids.length === 0) {
-        setGroups([])
-        setGroup(null)
-        setCreatorById({})
-        return
-      }
-
-      // 2) הבא את הקבוצות לפי ה-id שהתקבלו
-      const { data: gs, error: gErr } = await supabase
-        .from('groups')
-        .select('*')
-        .in('id', ids)
-        .order('created_at', { ascending: false })
-
-      if (gErr) {
-        console.warn('[refreshGroups] groups:', gErr.message)
-        setGroups([])
-        setGroup(null)
-        setCreatorById({})
-        return
-      }
-
-      const list: Group[] = gs ?? []
-      setGroups(list)
-
-      // בחירת קבוצה מוצגת
-      setGroup(prev => {
-        const preferred = targetGroupId ?? prev?.id ?? list[0]?.id ?? null
-        return list.find(g => g.id === preferred) ?? list[0] ?? null
-      })
-
-      // 3) טען מפורש את היוצרים (profiles) של הקבוצות כדי להציג בפנל הבדיקה
-      const creatorIds = Array.from(
-        new Set(list.map(g => g.created_by).filter(Boolean) as string[])
-      )
-
-      if (creatorIds.length > 0) {
-        const { data: creators, error: cErr } = await supabase
-          .from('profiles')
-          .select('id, display_name, email')
-          .in('id', creatorIds)
-
-        if (!cErr && creators) {
-          const map: Record<string, { name: string }> = {}
-          for (const row of creators as any[]) {
-            map[row.id] = { name: row.display_name || row.email || row.id }
-          }
-          setCreatorById(map)
-        } else {
-          setCreatorById({})
+        if (!error && rows) {
+          gs = (rows as any[]).map(r => ({
+            id: r.id,
+            name: r.name,
+            created_by: r.created_by,
+            created_at: r.created_at
+          })) as Group[]
         }
-      } else {
-        setCreatorById({})
+      } catch {}
+
+      // נפילה חכמה לשיטה הישנה (דרך memberships -> groups)
+      if (gs.length === 0) {
+        try {
+          const { data: mems } = await supabase
+            .from('memberships')
+            .select(`
+              groups (
+                id,
+                name,
+                created_by,
+                created_at,
+                creator:profiles!groups_created_by_fkey ( display_name, email )
+              )
+            `)
+            .eq('user_id', uid)
+
+          gs = (mems ?? []).map((m: any) => m.groups).filter(Boolean)
+        } catch {}
       }
+
+      setGroups(gs)
+
+      // אם יש group_id יעד (מההצטרפות) – נעדיף אותו; אחרת נשמור/נבחר ראשונה
+      setGroup(prev => {
+        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
+        return gs.find(g => g.id === pickId) ?? gs[0] ?? null
+      })
     },
     [session]
   )
@@ -205,19 +181,19 @@ export default function App() {
     })()
   }, [session, refreshGroups])
 
-  /* ----- Realtime: האזן לשינויים בטבלת memberships של המשתמש ----- */
+  /* ----- Realtime: להקשיב לשינויים בחברות שלי ----- */
   useEffect(() => {
     if (!session) return
     const uid = session.user.id
 
     const channel = supabase
-      .channel(`memberships-user-${uid}`)
+      .channel('memberships-watch')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${uid}` },
-        () => {
-          // כל שינוי בחברות -> טען מחדש את הקבוצות
-          refreshGroups(null)
+        async (_payload) => {
+          // כל שינוי בחברות שלי -> ריענון רשימת קבוצות
+          await refreshGroups(null)
         }
       )
       .subscribe()
@@ -338,6 +314,40 @@ export default function App() {
     }
   }
 
+  // בדיקת אבחון: באילו קבוצות אני נמצא ומי יצר אותן
+  const checkMyGroups = async () => {
+    if (!session) return
+    const uid = session.user.id
+
+    // נשתמש באותה שיטה "החדשה"
+    const { data: rows, error } = await supabase
+      .from('groups')
+      .select(`
+        id,
+        name,
+        creator:profiles!groups_created_by_fkey ( display_name, email ),
+        memberships!inner ( user_id )
+      `)
+      .eq('memberships.user_id', uid)
+
+    if (error) {
+      alert('שגיאה בבדיקה: ' + error.message)
+      return
+    }
+
+    if (!rows || rows.length === 0) {
+      alert('אין קבוצות משויכות (לפי השיטה החדשה).')
+      return
+    }
+
+    const lines = rows.map((r: any) => {
+      const creator =
+        r.creator?.display_name || r.creator?.email || r.created_by || 'לא ידוע'
+      return `• ${r.name} — יוצר: ${creator}`
+    })
+    alert(lines.join('\n'))
+  }
+
   /* ----- guards ----- */
   if (!session) return <AuthScreen />
 
@@ -352,17 +362,14 @@ export default function App() {
           צור קבוצה חדשה
         </button>
 
-        {/* פנל בדיקה גם כאשר אין קבוצות */}
-        <div className='mt-6'>
+        {/* כפתור אבחון – מציג אילו קבוצות משויכות למשתמש */}
+        <div className="mt-6">
           <button
-            className='text-xs underline text-gray-600'
-            onClick={() => setShowMembershipDebug(v => !v)}
+            onClick={checkMyGroups}
+            className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50"
           >
-            {showMembershipDebug ? 'הסתר בדיקת חברות' : 'הצג בדיקת חברות'}
+            בדיקה: באילו קבוצות אני נמצא?
           </button>
-          {showMembershipDebug && (
-            <MembershipDebug groups={groups} creatorById={creatorById} />
-          )}
         </div>
       </div>
     )
@@ -383,25 +390,11 @@ export default function App() {
           }}
         />
         <div className='flex-1' />
-        <button
-          className='text-xs underline text-gray-500'
-          onClick={() => setShowMembershipDebug(v => !v)}
-          title='הצג/הסתר בדיקת חברות'
-        >
-          בדיקת חברות
-        </button>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
         </button>
       </header>
-
-      {/* Debug panel */}
-      {showMembershipDebug && (
-        <div className='px-4 py-2'>
-          <MembershipDebug groups={groups} creatorById={creatorById} />
-        </div>
-      )}
 
       {/* top summary line */}
       <div className='px-4 pt-2 text-sm text-gray-600'>
@@ -518,36 +511,6 @@ export default function App() {
             refresh()
           }}
         />
-      )}
-    </div>
-  )
-}
-
-/* ---------- Debug panel component ---------- */
-function MembershipDebug({
-  groups,
-  creatorById,
-}: {
-  groups: Group[]
-  creatorById: Record<string, { name: string }>
-}) {
-  return (
-    <div className='rounded-xl border bg-slate-50 p-3 text-sm'>
-      <div className='font-medium mb-2'>בדיקה: באילו קבוצות אני נמצא?</div>
-      {groups.length === 0 ? (
-        <div className='text-gray-600'>אין קבוצות משוייכות למשתמש.</div>
-      ) : (
-        <ul className='space-y-1'>
-          {groups.map(g => {
-            const creator = creatorById[g.created_by ?? '']?.name ?? g.created_by ?? 'לא ידוע'
-            return (
-              <li key={g.id} className='flex items-center justify-between'>
-                <span>שם: <b>{g.name}</b></span>
-                <span className='text-gray-600'>יוצר: {creator}</span>
-              </li>
-            )
-          })}
-        </ul>
       )}
     </div>
   )
