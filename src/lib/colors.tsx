@@ -1,40 +1,28 @@
 // src/lib/colors.tsx
-import React from 'react';
-
-/** צבע דטרמיניסטי לכל uid מתוך פאלטה */
 const PALETTE = [
-  '#2563eb', // blue-600
-  '#16a34a', // green-600
-  '#d97706', // amber-600
-  '#db2777', // pink-600
-  '#0ea5e9', // sky-500
-  '#7c3aed', // violet-600
-  '#ef4444', // red-500
-  '#059669', // emerald-600
-  '#f59e0b', // amber-500
-  '#06b6d4', // cyan-500
-];
+  '#2563eb', '#16a34a', '#d97706', '#db2777', '#0ea5e9',
+  '#7c3aed', '#ef4444', '#059669', '#f59e0b', '#06b6d4',
+] as const;
 
+const DEFAULT_COLOR = '#475569'; // slate-600
 const colorCache = new Map<string, string>();
 
 function hashUid(uid: string) {
   let h = 0;
-  for (let i = 0; i < uid.length; i++) {
-    h = (h * 31 + uid.charCodeAt(i)) | 0;
-  }
+  for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) | 0;
   return h >>> 0;
 }
 
 export function userColor(uid: string): string {
-  if (!uid) return '#475569'; // slate-600 fallback
+  if (!uid) return DEFAULT_COLOR;
   if (!colorCache.has(uid)) {
     const idx = hashUid(uid) % PALETTE.length;
-    colorCache.set(uid, PALETTE[idx]);
+    const color = PALETTE[idx] ?? DEFAULT_COLOR; // fallback בטוח
+    colorCache.set(uid, color);
   }
   return colorCache.get(uid)!;
 }
 
-// רקע עדין עם alpha
 export function userBg(uid: string, alpha = 0.06): string {
   const hex = userColor(uid).replace('#', '');
   const r = parseInt(hex.slice(0, 2), 16);
@@ -43,7 +31,6 @@ export function userBg(uid: string, alpha = 0.06): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// צבע גבול/הצללה (קצת כהה יותר)
 export function userBorder(uid: string, alpha = 0.25): string {
   const hex = userColor(uid).replace('#', '');
   const r = parseInt(hex.slice(0, 2), 16);
@@ -52,34 +39,31 @@ export function userBorder(uid: string, alpha = 0.25): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-/** תגית שם קטנה עם צבע המזהה של המשתמש */
+/** תגית קטנה עם צבע לפי המשתמש */
 export function UserChip({
   uid,
   name,
-  className,
-  title,
+  size = 'sm',
 }: {
   uid: string;
-  name?: string;
-  className?: string;
-  title?: string;
+  name: string;
+  size?: 'sm' | 'md';
 }) {
   const fg = userColor(uid);
+  const bg = userBg(uid, 0.12);
+  const br = userBorder(uid, 0.4);
+
+  const px = size === 'md' ? 'px-2' : 'px-1.5';
+  const py = size === 'md' ? 'py-1' : 'py-0.5';
+  const text = size === 'md' ? 'text-[13px]' : 'text-[12px]';
+
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium border ${className ?? ''}`}
-      style={{
-        color: fg,
-        backgroundColor: userBg(uid),
-        borderColor: userBorder(uid),
-      }}
-      title={title ?? name}
-      dir="auto"
+      title={name}
+      className={`inline-flex items-center gap-1 rounded-full border font-medium ${px} ${py} ${text}`}
+      style={{ color: fg, backgroundColor: bg, borderColor: br }}
     >
-      <span
-        className="inline-block w-2 h-2 rounded-full"
-        style={{ backgroundColor: fg }}
-      />
+      <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: fg }} />
       {name}
     </span>
   );
