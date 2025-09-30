@@ -64,7 +64,7 @@ export default function App() {
       if (!session) return
       const uid = session.user.id
 
-      // דרך יציבה: שולפים ישירות מקבוצות עם inner-join לחברות
+      // שולפים ישירות מקבוצות עם inner-join לחברות (ללא join ל-profiles)
       let gs: Group[] = []
       try {
         const { data: rows, error } = await supabase
@@ -74,7 +74,6 @@ export default function App() {
             name,
             created_by,
             created_at,
-            creator:profiles!groups_created_by_fkey ( display_name, email ),
             memberships!inner ( user_id )
           `)
           .eq('memberships.user_id', uid)
@@ -89,7 +88,7 @@ export default function App() {
         }
       } catch {}
 
-      // נפילה חכמה לשיטה הישנה (דרך memberships -> groups)
+      // fallback דרך memberships -> groups
       if (gs.length === 0) {
         try {
           const { data: mems } = await supabase
@@ -99,8 +98,7 @@ export default function App() {
                 id,
                 name,
                 created_by,
-                created_at,
-                creator:profiles!groups_created_by_fkey ( display_name, email )
+                created_at
               )
             `)
             .eq('user_id', uid)
@@ -111,7 +109,7 @@ export default function App() {
 
       setGroups(gs)
 
-      // אם יש group_id יעד (מההצטרפות) – נעדיף אותו; אחרת נשמור/נבחר ראשונה
+      // בחירת קבוצה
       setGroup(prev => {
         const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
         return gs.find(g => g.id === pickId) ?? gs[0] ?? null
@@ -192,7 +190,6 @@ export default function App() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${uid}` },
         async (_payload) => {
-          // כל שינוי בחברות שלי -> ריענון רשימת קבוצות
           await refreshGroups(null)
         }
       )
@@ -206,7 +203,7 @@ export default function App() {
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group (uses explicit FK alias) ----- */
+  /* ----- load members for current group (אם יש FK מ-memberships.user_id ל-profiles.id) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -314,18 +311,18 @@ export default function App() {
     }
   }
 
-  // בדיקת אבחון: באילו קבוצות אני נמצא ומי יצר אותן
+  // בדיקת אבחון: באילו קבוצות אני נמצא ומי יצר אותן (ללא join ל-profiles)
   const checkMyGroups = async () => {
     if (!session) return
     const uid = session.user.id
 
-    // נשתמש באותה שיטה "החדשה"
     const { data: rows, error } = await supabase
       .from('groups')
       .select(`
         id,
         name,
-        creator:profiles!groups_created_by_fkey ( display_name, email ),
+        created_by,
+        created_at,
         memberships!inner ( user_id )
       `)
       .eq('memberships.user_id', uid)
@@ -334,15 +331,31 @@ export default function App() {
       alert('שגיאה בבדיקה: ' + error.message)
       return
     }
-
     if (!rows || rows.length === 0) {
-      alert('אין קבוצות משויכות (לפי השיטה החדשה).')
+      alert('אין קבוצות משויכות.')
       return
     }
 
-    const lines = rows.map((r: any) => {
-      const creator =
-        r.creator?.display_name || r.creator?.email || r.created_by || 'לא ידוע'
+    // מביאים את שמות היוצרים בשאילתה נפרדת
+    const creatorIds = Array.from(
+      new Set((rows as any[]).map(r => r.created_by).filter(Boolean))
+    )
+    let creators: Record<string, { display_name?: string; email?: string }> = {}
+
+    if (creatorIds.length > 0) {
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, display_name, email')
+        .in('id', creatorIds as string[])
+
+      ;(profs ?? []).forEach((p: any) => {
+        creators[p.id] = { display_name: p.display_name, email: p.email }
+      })
+    }
+
+    const lines = (rows as any[]).map((r) => {
+      const c = creators[r.created_by] || {}
+      const creator = c.display_name || c.email || r.created_by || 'לא ידוע'
       return `• ${r.name} — יוצר: ${creator}`
     })
     alert(lines.join('\n'))
