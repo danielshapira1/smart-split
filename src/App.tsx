@@ -42,7 +42,7 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
-  // חברי הקבוצה למאזנים
+  // חברי הקבוצה למאזנים (לשמות בלבד — לא מסתמכים על זה לחישוב מספר משתתפים)
   const [members, setMembers] = useState<Member[]>([])
 
   // --- ברכה לשם משתמש (זמין לכל המצבים) ---
@@ -189,7 +189,7 @@ export default function App() {
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group (uses explicit FK alias) ----- */
+  /* ----- load members for current group (לשמות בלבד) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -225,7 +225,7 @@ export default function App() {
     })()
   }, [group])
 
-  /* ----- filters ----- */
+  /* ----- filters (לתצוגת הרשימה בלבד) ----- */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return expenses.filter((e) => {
@@ -235,32 +235,55 @@ export default function App() {
     })
   }, [expenses, search, category])
 
-  /* ----- סיכום למעלה: “מי חייב למי” לזוג, אחרת טקסט כללי ----- */
+  /* ---------- סיכום למעלה: “מי חייב למי” ----------
+     * לא מסתמכים על memberships (שיכול להיות מוגבל RLS),
+     * אלא על כל ההוצאות של הקבוצה (expenses).
+     * המשתתפים = user_id ייחודיים מתוך ההוצאות.
+  -------------------------------------------------- */
   const meId = session?.user?.id ?? ''
-  const otherMember = useMemo(
-    () => members.find(m => m.user_id !== meId),
-    [members, meId]
-  )
+
+  // כל המשתתפים לפי ההוצאות בפועל
+  const participantIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const e of expenses) if (e.user_id) s.add(e.user_id)
+    return Array.from(s)
+  }, [expenses])
+
+  const isPair = participantIds.length === 2
+
+  const otherId = useMemo(() => {
+    if (!isPair) return ''
+    return participantIds.find(id => id !== meId) || ''
+  }, [isPair, participantIds, meId])
+
   const otherName = useMemo(() => {
-    if (!otherMember) return 'המשתתף/ת השני/ה'
-    return otherMember.name || otherMember.user_id
-  }, [otherMember])
+    if (!otherId) return 'המשתתף/ת השני/ה'
+    const m = members.find(x => x.user_id === otherId)
+    if (m?.name) return m.name
+    const exp = expenses.find(e => e.user_id === otherId && e.payer_name)
+    return exp?.payer_name || otherId
+  }, [otherId, members, expenses])
+
+  // סכומים – תמיד על בסיס כל ההוצאות (לא מושפעים מסינון תצוגה)
+  const totalCentsAll = useMemo(
+    () => expenses.reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
+    [expenses]
+  )
+  const myPaidAll = useMemo(
+    () => expenses.filter(e => e.user_id === meId)
+                  .reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
+    [expenses, meId]
+  )
+
+  const n = participantIds.length || 1
+  const myShare = Math.round(totalCentsAll / n)
+  const netCents = myShare - myPaidAll // >0 אני חייב; <0 חייבים לי
 
   const summaryText = useMemo(() => {
     if (!group) return ''
-    if (filtered.length === 0) return 'אין הוצאות להצגה'
+    if (expenses.length === 0) return 'אין הוצאות להצגה'
 
-    const n = Math.max(1, members.length)
-    const totalCents = filtered.reduce((s, e) => s + (e.amount_cents ?? 0), 0)
-    const myPaid = filtered
-      .filter(e => e.user_id === meId)
-      .reduce((s, e) => s + (e.amount_cents ?? 0), 0)
-
-    const myShare = Math.round(totalCents / n)
-    const netCents = myShare - myPaid // >0 אני חייב; <0 חייבים לי
     const abs = Math.abs(netCents) / 100
-
-    const isPair = members.length === 2
     if (netCents > 0) {
       return isPair
         ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}`
@@ -272,7 +295,7 @@ export default function App() {
         : `הקבוצה חייבת לך ₪${abs.toFixed(2)}`
     }
     return 'מאוזנים'
-  }, [filtered, members, meId, group, otherName])
+  }, [group, expenses.length, netCents, isPair, otherName])
 
   const currentPayerName =
     profile?.display_name ||
