@@ -12,7 +12,7 @@ import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
 
-/* ---------- Types used here ---------- */
+/* ---------- Local types ---------- */
 export type Expense = {
   id: string
   group_id: string
@@ -24,13 +24,6 @@ export type Expense = {
   occurred_on: string
   created_at: string
   payer_name?: string
-}
-
-type AcceptResult = {
-  joined: boolean
-  already_member: boolean | null
-  group_id: string
-  group_name: string
 }
 
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
@@ -49,11 +42,12 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
-  // הודעת פלאש קצרה
-  const [flash, setFlash] = useState<string | null>(null)
-
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
+
+  // זיהוי מי מחובר + הודעת-פלש
+  const [whoami, setWhoami] = useState<string>('')
+  const [flash, setFlash] = useState<string | null>(null)
 
   /* ----- auth ----- */
   useEffect(() => {
@@ -61,6 +55,12 @@ export default function App() {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
     return () => sub?.subscription?.unsubscribe?.()
   }, [])
+
+  useEffect(() => {
+    if (!session) { setWhoami(''); return }
+    const emailOrId = session.user.email ?? session.user.id
+    setWhoami(emailOrId)
+  }, [session])
 
   // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
@@ -130,7 +130,7 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN / ?token=TOKEN) ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite= או ?token=)  ----- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
@@ -142,23 +142,28 @@ export default function App() {
       if (error) {
         alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
       } else {
-        const res = (data || {}) as Partial<AcceptResult>
-        await refreshGroups(res.group_id ?? null)
+        // data: { joined, already_member, group_id, group_name }
+        const gid = (data as any)?.group_id ?? null
+        const gname = (data as any)?.group_name ?? ''
+        const already = !!(data as any)?.already_member
 
-        if (res.group_name) {
-          setFlash(res.already_member ? `את/ה כבר חבר/ה ב"${res.group_name}"` : `הצטרפת ל"${res.group_name}" בהצלחה`)
-          window.setTimeout(() => setFlash(null), 3000)
-        }
+        await refreshGroups(gid)           // רענון מיידי
+        setTimeout(() => refreshGroups(gid), 1200) // רענון מאוחר – סוגר פינות latency
+
+        setFlash(already
+          ? `את/ה כבר חבר/ה ב"${gname}"`
+          : `הצטרפת ל"${gname}" בהצלחה`)
+        window.setTimeout(() => setFlash(null), 3000)
       }
 
-      // הסרת הפרמטרים מה-URL כדי לא לחזור על הפעולה ברענון
+      // הסרת הפרמטרים כדי שלא יחזור ברענון
       url.searchParams.delete('invite')
       url.searchParams.delete('token')
       window.history.replaceState({}, '', url.toString())
     })()
   }, [session, refreshGroups])
 
-  /* ----- realtime: רענון קבוצות כשחברות של המשתמש משתנה ----- */
+  /* ----- realtime: כל שינוי בחברות של המשתמש => רענון ----- */
   useEffect(() => {
     if (!session) return
     const ch = supabase
@@ -169,16 +174,13 @@ export default function App() {
         () => refreshGroups()
       )
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(ch)
-    }
+    return () => { supabase.removeChannel(ch) }
   }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group (uses explicit FK alias) ----- */
+  /* ----- load members for current group (with explicit FK alias) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -254,7 +256,7 @@ export default function App() {
         setGroup(row)
         setRole('owner')
         setFlash(`נוצרה קבוצה "${row.name}"`)
-        window.setTimeout(() => setFlash(null), 2500)
+        setTimeout(() => setFlash(null), 2500)
         return
       }
     } catch {
@@ -283,7 +285,7 @@ export default function App() {
       setGroup(g)
       setRole('owner')
       setFlash(`נוצרה קבוצה "${g.name}"`)
-      window.setTimeout(() => setFlash(null), 2500)
+      setTimeout(() => setFlash(null), 2500)
     } catch (err: any) {
       console.error('[createGroup] error', err)
       alert(err?.message ?? 'יצירת קבוצה נכשלה')
@@ -296,6 +298,16 @@ export default function App() {
   if (!group) {
     return (
       <div className='h-full flex flex-col items-center justify-center gap-4'>
+        {whoami && (
+          <div className='px-4 py-2 bg-slate-50 text-slate-600 text-xs rounded'>
+            מחובר כ־ <span className='font-medium'>{whoami}</span>
+          </div>
+        )}
+        {flash && (
+          <div className='px-3 py-2 rounded bg-emerald-50 text-emerald-800 text-sm'>
+            {flash}
+          </div>
+        )}
         <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
         <button
           className='rounded-full bg-black text-white px-4 py-2'
@@ -310,6 +322,18 @@ export default function App() {
   /* ---------- render ---------- */
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
+      {/* who-am-i + flash (top) */}
+      {whoami && (
+        <div className='px-4 py-2 bg-slate-50 text-slate-600 text-xs'>
+          מחובר כ־ <span className='font-medium'>{whoami}</span>
+        </div>
+      )}
+      {flash && (
+        <div className='fixed top-3 right-3 z-50 bg-black text-white text-sm px-3 py-2 rounded-xl shadow'>
+          {flash}
+        </div>
+      )}
+
       {/* header */}
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
@@ -327,13 +351,6 @@ export default function App() {
           <LogOut className='w-4 h-4' /> יציאה
         </button>
       </header>
-
-      {/* flash message */}
-      {flash && (
-        <div className='px-4 py-2 bg-emerald-50 text-emerald-700 text-sm'>
-          {flash}
-        </div>
-      )}
 
       {/* top summary line */}
       <div className='px-4 pt-2 text-sm text-gray-600'>
