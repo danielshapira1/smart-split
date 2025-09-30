@@ -45,6 +45,10 @@ export default function App() {
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
+  // --- Debug UI state: מפה של יוצרי קבוצות + פתיחה/סגירה של הפנל ---
+  const [creatorById, setCreatorById] = useState<Record<string, { name: string }>>({})
+  const [showMembershipDebug, setShowMembershipDebug] = useState(false)
+
   /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
@@ -58,7 +62,7 @@ export default function App() {
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד (שני שלבים כדי להימנע מבאגי join) ----- */
+  /* ----- helper: ריענון קבוצות + טעינת יוצרי קבוצות ----- */
   const refreshGroups = React.useCallback(
     async (targetGroupId?: string | null) => {
       if (!session) return
@@ -71,9 +75,10 @@ export default function App() {
         .eq('user_id', uid)
 
       if (memErr) {
-        console.warn('[refreshGroups] failed to load memberships:', memErr.message)
+        console.warn('[refreshGroups] memberships:', memErr.message)
         setGroups([])
         setGroup(null)
+        setCreatorById({})
         return
       }
 
@@ -84,6 +89,7 @@ export default function App() {
       if (ids.length === 0) {
         setGroups([])
         setGroup(null)
+        setCreatorById({})
         return
       }
 
@@ -95,9 +101,10 @@ export default function App() {
         .order('created_at', { ascending: false })
 
       if (gErr) {
-        console.warn('[refreshGroups] failed to load groups:', gErr.message)
+        console.warn('[refreshGroups] groups:', gErr.message)
         setGroups([])
         setGroup(null)
+        setCreatorById({})
         return
       }
 
@@ -109,6 +116,30 @@ export default function App() {
         const preferred = targetGroupId ?? prev?.id ?? list[0]?.id ?? null
         return list.find(g => g.id === preferred) ?? list[0] ?? null
       })
+
+      // 3) טען מפורש את היוצרים (profiles) של הקבוצות כדי להציג בפנל הבדיקה
+      const creatorIds = Array.from(
+        new Set(list.map(g => g.created_by).filter(Boolean) as string[])
+      )
+
+      if (creatorIds.length > 0) {
+        const { data: creators, error: cErr } = await supabase
+          .from('profiles')
+          .select('id, display_name, email')
+          .in('id', creatorIds)
+
+        if (!cErr && creators) {
+          const map: Record<string, { name: string }> = {}
+          for (const row of creators as any[]) {
+            map[row.id] = { name: row.display_name || row.email || row.id }
+          }
+          setCreatorById(map)
+        } else {
+          setCreatorById({})
+        }
+      } else {
+        setCreatorById({})
+      }
     },
     [session]
   )
@@ -172,6 +203,28 @@ export default function App() {
       url.searchParams.delete('invite')
       window.history.replaceState({}, '', url.toString())
     })()
+  }, [session, refreshGroups])
+
+  /* ----- Realtime: האזן לשינויים בטבלת memberships של המשתמש ----- */
+  useEffect(() => {
+    if (!session) return
+    const uid = session.user.id
+
+    const channel = supabase
+      .channel(`memberships-user-${uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${uid}` },
+        () => {
+          // כל שינוי בחברות -> טען מחדש את הקבוצות
+          refreshGroups(null)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
@@ -298,6 +351,19 @@ export default function App() {
         >
           צור קבוצה חדשה
         </button>
+
+        {/* פנל בדיקה גם כאשר אין קבוצות */}
+        <div className='mt-6'>
+          <button
+            className='text-xs underline text-gray-600'
+            onClick={() => setShowMembershipDebug(v => !v)}
+          >
+            {showMembershipDebug ? 'הסתר בדיקת חברות' : 'הצג בדיקת חברות'}
+          </button>
+          {showMembershipDebug && (
+            <MembershipDebug groups={groups} creatorById={creatorById} />
+          )}
+        </div>
       </div>
     )
   }
@@ -317,11 +383,25 @@ export default function App() {
           }}
         />
         <div className='flex-1' />
+        <button
+          className='text-xs underline text-gray-500'
+          onClick={() => setShowMembershipDebug(v => !v)}
+          title='הצג/הסתר בדיקת חברות'
+        >
+          בדיקת חברות
+        </button>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className='text-sm text-red-600 flex items-center gap-1'>
           <LogOut className='w-4 h-4' /> יציאה
         </button>
       </header>
+
+      {/* Debug panel */}
+      {showMembershipDebug && (
+        <div className='px-4 py-2'>
+          <MembershipDebug groups={groups} creatorById={creatorById} />
+        </div>
+      )}
 
       {/* top summary line */}
       <div className='px-4 pt-2 text-sm text-gray-600'>
@@ -438,6 +518,36 @@ export default function App() {
             refresh()
           }}
         />
+      )}
+    </div>
+  )
+}
+
+/* ---------- Debug panel component ---------- */
+function MembershipDebug({
+  groups,
+  creatorById,
+}: {
+  groups: Group[]
+  creatorById: Record<string, { name: string }>
+}) {
+  return (
+    <div className='rounded-xl border bg-slate-50 p-3 text-sm'>
+      <div className='font-medium mb-2'>בדיקה: באילו קבוצות אני נמצא?</div>
+      {groups.length === 0 ? (
+        <div className='text-gray-600'>אין קבוצות משוייכות למשתמש.</div>
+      ) : (
+        <ul className='space-y-1'>
+          {groups.map(g => {
+            const creator = creatorById[g.created_by ?? '']?.name ?? g.created_by ?? 'לא ידוע'
+            return (
+              <li key={g.id} className='flex items-center justify-between'>
+                <span>שם: <b>{g.name}</b></span>
+                <span className='text-gray-600'>יוצר: {creator}</span>
+              </li>
+            )
+          })}
+        </ul>
       )}
     </div>
   )
