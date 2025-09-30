@@ -12,7 +12,7 @@ import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
 
-/* ---------- Local types ---------- */
+/* ---------- Types used here ---------- */
 export type Expense = {
   id: string
   group_id: string
@@ -45,10 +45,6 @@ export default function App() {
   // חברי הקבוצה למאזנים
   const [members, setMembers] = useState<Member[]>([])
 
-  // זיהוי מי מחובר + הודעת-פלש
-  const [whoami, setWhoami] = useState<string>('')
-  const [flash, setFlash] = useState<string | null>(null)
-
   /* ----- auth ----- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
@@ -56,36 +52,62 @@ export default function App() {
     return () => sub?.subscription?.unsubscribe?.()
   }, [])
 
-  useEffect(() => {
-    if (!session) { setWhoami(''); return }
-    const emailOrId = session.user.email ?? session.user.id
-    setWhoami(emailOrId)
-  }, [session])
-
   // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
     if (!session) return
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד ----- */
+  /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד (שני שלבים כדי להימנע מבאגי join) ----- */
   const refreshGroups = React.useCallback(
     async (targetGroupId?: string | null) => {
       if (!session) return
       const uid = session.user.id
 
-      const { data: mems } = await supabase
+      // 1) שלוף את כל ה-group_id של המשתמש
+      const { data: memRows, error: memErr } = await supabase
         .from('memberships')
-        .select('groups(*)')
+        .select('group_id')
         .eq('user_id', uid)
 
-      const gs: Group[] = (mems ?? []).map((m: any) => m.groups).filter(Boolean)
-      setGroups(gs)
+      if (memErr) {
+        console.warn('[refreshGroups] failed to load memberships:', memErr.message)
+        setGroups([])
+        setGroup(null)
+        return
+      }
 
-      // אם יש group_id יעד (מההצטרפות) – נעדיף אותו; אחרת נשמור/נבחר ראשונה
+      const ids = Array.from(
+        new Set((memRows ?? []).map((m: any) => m.group_id).filter(Boolean))
+      )
+
+      if (ids.length === 0) {
+        setGroups([])
+        setGroup(null)
+        return
+      }
+
+      // 2) הבא את הקבוצות לפי ה-id שהתקבלו
+      const { data: gs, error: gErr } = await supabase
+        .from('groups')
+        .select('*')
+        .in('id', ids)
+        .order('created_at', { ascending: false })
+
+      if (gErr) {
+        console.warn('[refreshGroups] failed to load groups:', gErr.message)
+        setGroups([])
+        setGroup(null)
+        return
+      }
+
+      const list: Group[] = gs ?? []
+      setGroups(list)
+
+      // בחירת קבוצה מוצגת
       setGroup(prev => {
-        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
-        return gs.find(g => g.id === pickId) ?? gs[0] ?? null
+        const preferred = targetGroupId ?? prev?.id ?? list[0]?.id ?? null
+        return list.find(g => g.id === preferred) ?? list[0] ?? null
       })
     },
     [session]
@@ -130,11 +152,11 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite= או ?token=)  ----- */
+  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN)  ----- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
-    const token = url.searchParams.get('invite') || url.searchParams.get('token')
+    const token = url.searchParams.get('invite')
     if (!token) return
 
     ;(async () => {
@@ -143,44 +165,19 @@ export default function App() {
         alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
       } else {
         // data: { joined, already_member, group_id, group_name }
-        const gid = (data as any)?.group_id ?? null
-        const gname = (data as any)?.group_name ?? ''
-        const already = !!(data as any)?.already_member
-
-        await refreshGroups(gid)           // רענון מיידי
-        setTimeout(() => refreshGroups(gid), 1200) // רענון מאוחר – סוגר פינות latency
-
-        setFlash(already
-          ? `את/ה כבר חבר/ה ב"${gname}"`
-          : `הצטרפת ל"${gname}" בהצלחה`)
-        window.setTimeout(() => setFlash(null), 3000)
+        await refreshGroups(data?.group_id ?? null)
       }
 
-      // הסרת הפרמטרים כדי שלא יחזור ברענון
+      // הסרת הפרמטר מה-URL כדי לא לחזור על הפעולה ברענון
       url.searchParams.delete('invite')
-      url.searchParams.delete('token')
       window.history.replaceState({}, '', url.toString())
     })()
-  }, [session, refreshGroups])
-
-  /* ----- realtime: כל שינוי בחברות של המשתמש => רענון ----- */
-  useEffect(() => {
-    if (!session) return
-    const ch = supabase
-      .channel('rt-memberships-self')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${session.user.id}` },
-        () => refreshGroups()
-      )
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
   }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
   const { expenses, refresh } = useRealtimeExpenses(group?.id)
 
-  /* ----- load members for current group (with explicit FK alias) ----- */
+  /* ----- load members for current group (uses explicit FK alias) ----- */
   useEffect(() => {
     if (!group) {
       setMembers([])
@@ -255,8 +252,6 @@ export default function App() {
         setGroups((prev) => [row, ...prev])
         setGroup(row)
         setRole('owner')
-        setFlash(`נוצרה קבוצה "${row.name}"`)
-        setTimeout(() => setFlash(null), 2500)
         return
       }
     } catch {
@@ -284,8 +279,6 @@ export default function App() {
       setGroups((prev) => [g, ...prev])
       setGroup(g)
       setRole('owner')
-      setFlash(`נוצרה קבוצה "${g.name}"`)
-      setTimeout(() => setFlash(null), 2500)
     } catch (err: any) {
       console.error('[createGroup] error', err)
       alert(err?.message ?? 'יצירת קבוצה נכשלה')
@@ -298,16 +291,6 @@ export default function App() {
   if (!group) {
     return (
       <div className='h-full flex flex-col items-center justify-center gap-4'>
-        {whoami && (
-          <div className='px-4 py-2 bg-slate-50 text-slate-600 text-xs rounded'>
-            מחובר כ־ <span className='font-medium'>{whoami}</span>
-          </div>
-        )}
-        {flash && (
-          <div className='px-3 py-2 rounded bg-emerald-50 text-emerald-800 text-sm'>
-            {flash}
-          </div>
-        )}
         <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
         <button
           className='rounded-full bg-black text-white px-4 py-2'
@@ -322,18 +305,6 @@ export default function App() {
   /* ---------- render ---------- */
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
-      {/* who-am-i + flash (top) */}
-      {whoami && (
-        <div className='px-4 py-2 bg-slate-50 text-slate-600 text-xs'>
-          מחובר כ־ <span className='font-medium'>{whoami}</span>
-        </div>
-      )}
-      {flash && (
-        <div className='fixed top-3 right-3 z-50 bg-black text-white text-sm px-3 py-2 rounded-xl shadow'>
-          {flash}
-        </div>
-      )}
-
       {/* header */}
       <header className='sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2'>
         <GroupSwitcher
