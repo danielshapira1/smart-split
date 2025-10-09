@@ -1,4 +1,6 @@
 // src/lib/colors.tsx
+import React from 'react';
+
 const PALETTE = [
   '#2563eb', '#16a34a', '#d97706', '#db2777', '#0ea5e9',
   '#7c3aed', '#ef4444', '#059669', '#f59e0b', '#06b6d4',
@@ -46,9 +48,10 @@ export function UserChip({
   size = 'sm',
 }: {
   uid: string;
-  name: string;
+  name?: string | null;
   size?: 'sm' | 'md';
 }) {
+  const label = name ?? uid;
   const fg = userColor(uid);
   const bg = userBg(uid, 0.12);
   const br = userBorder(uid, 0.4);
@@ -59,12 +62,12 @@ export function UserChip({
 
   return (
     <span
-      title={name}
+      title={label}
       className={`inline-flex items-center gap-1 rounded-full border font-medium ${px} ${py} ${text}`}
       style={{ color: fg, backgroundColor: bg, borderColor: br }}
     >
       <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: fg }} />
-      {name}
+      {label}
     </span>
   );
 }

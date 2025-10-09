@@ -11,22 +11,48 @@ import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 
 import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
+import type { Expense as PanelExpense } from './components/BalancesPanel' // בשביל התאמה טיפוסית ל־BalancesPanel
 
-/* ---------- Types used here ---------- */
-export type Expense = {
+/* ---------- טיפוס הוצאה כפי שמגיע מה-DB/Hook (גמיש) ---------- */
+type Expense = {
   id: string
   group_id: string
   user_id: string
-  amount_cents: number
-  currency: string
-  description: string
-  category: string
-  occurred_on: string
-  created_at: string
-  payer_name?: string
+  amount_cents: number | string
+  currency?: string | null
+  description?: string | null
+  category?: string | null
+  occurred_on?: string | null
+  created_at?: string | null
+  payer_name?: string | null
 }
 
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
+
+/* עזר: המרה בטוחה לסנטים */
+const toCents = (v: unknown) => {
+  const n =
+    typeof v === 'string'
+      ? Number.isFinite(+v) ? Math.round(parseFloat(v)) : 0
+      : Math.round((v as number) ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+/* המרה ל־Expense ש־BalancesPanel מצפה לו (מסיר null ומנרמל סנטים) */
+function normalizeExpense(e: Expense): PanelExpense {
+  return {
+    id: e.id,
+    group_id: e.group_id,
+    user_id: e.user_id,
+    amount_cents: toCents(e.amount_cents),
+    currency: e.currency ?? undefined,
+    description: e.description ?? undefined,
+    category: e.category ?? undefined,
+    occurred_on: e.occurred_on ?? undefined,
+    created_at: e.created_at ?? undefined,
+    payer_name: e.payer_name ?? undefined,
+  }
+}
 
 /* ---------- App ---------- */
 export default function App() {
@@ -70,7 +96,6 @@ export default function App() {
       if (!session) return
       const uid = session.user.id
 
-      // נסיון עיקרי: JOIN על memberships
       let gs: Group[] = []
       try {
         const { data, error } = await supabase
@@ -88,7 +113,6 @@ export default function App() {
         if (error) throw error
         gs = (data ?? []) as any as Group[]
       } catch {
-        // fallback: דרך memberships
         const { data: mems } = await supabase
           .from('memberships')
           .select('groups(*)')
@@ -112,7 +136,6 @@ export default function App() {
     ;(async () => {
       await refreshGroups(null)
 
-      // פרופיל
       const { data: prof } = await supabase
         .from('profiles')
         .select('*')
@@ -176,18 +199,18 @@ export default function App() {
       if (error) {
         alert('שגיאה בהצטרפות לקבוצה: ' + error.message)
       } else {
-        // data: { joined, already_member, group_id, group_name }
         await refreshGroups(data?.group_id ?? null)
       }
 
-      // הסרת הפרמטר מה-URL כדי לא לחזור על הפעולה ברענון
       url.searchParams.delete('invite')
       window.history.replaceState({}, '', url.toString())
     })()
   }, [session, refreshGroups])
 
   /* ----- realtime expenses ----- */
-  const { expenses, refresh } = useRealtimeExpenses(group?.id)
+  const { expenses, refresh } = useRealtimeExpenses(group?.id) as {
+    expenses: Expense[]; refresh: () => void
+  }
 
   /* ----- load members for current group (לשמות בלבד) ----- */
   useEffect(() => {
@@ -229,20 +252,15 @@ export default function App() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return expenses.filter((e) => {
-      const okCat = !category || e.category === category
+      const okCat = !category || (e.category ?? '') === category
       const okSearch = !q || (e.description ?? '').toLowerCase().includes(q)
       return okCat && okSearch
     })
   }, [expenses, search, category])
 
-  /* ---------- סיכום למעלה: “מי חייב למי” ----------
-     * לא מסתמכים על memberships (שיכול להיות מוגבל RLS),
-     * אלא על כל ההוצאות של הקבוצה (expenses).
-     * המשתתפים = user_id ייחודיים מתוך ההוצאות.
-  -------------------------------------------------- */
+  /* ---------- סיכום למעלה: “מי חייב למי” ---------- */
   const meId = session?.user?.id ?? ''
 
-  // כל המשתתפים לפי ההוצאות בפועל
   const participantIds = useMemo(() => {
     const s = new Set<string>()
     for (const e of expenses) if (e.user_id) s.add(e.user_id)
@@ -261,17 +279,16 @@ export default function App() {
     const m = members.find(x => x.user_id === otherId)
     if (m?.name) return m.name
     const exp = expenses.find(e => e.user_id === otherId && e.payer_name)
-    return exp?.payer_name || otherId
+    return (exp?.payer_name ?? undefined) || otherId
   }, [otherId, members, expenses])
 
-  // סכומים – תמיד על בסיס כל ההוצאות (לא מושפעים מסינון תצוגה)
   const totalCentsAll = useMemo(
-    () => expenses.reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
+    () => expenses.reduce((sum, e) => sum + toCents(e.amount_cents), 0),
     [expenses]
   )
   const myPaidAll = useMemo(
     () => expenses.filter(e => e.user_id === meId)
-                  .reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
+                  .reduce((sum, e) => sum + toCents(e.amount_cents), 0),
     [expenses, meId]
   )
 
@@ -307,7 +324,6 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
-  // יצירת קבוצה חדשה
   const createGroup = async () => {
     const name = prompt('שם קבוצה חדש:')?.trim()
     if (!name || !session) return
@@ -355,7 +371,6 @@ export default function App() {
   /* ----- guards ----- */
   if (!session) return <AuthScreen />
 
-  // === מסך ללא קבוצה: עם ברכה למעלה ===
   if (!group) {
     return (
       <div className='h-full flex flex-col'>
@@ -381,6 +396,12 @@ export default function App() {
       </div>
     )
   }
+
+  /* ---------- exp array מנורמל ל־BalancesPanel ---------- */
+  const panelExpenses: PanelExpense[] = useMemo(
+    () => expenses.map(normalizeExpense),
+    [expenses]
+  )
 
   /* ---------- render with group ---------- */
   return (
@@ -461,30 +482,33 @@ export default function App() {
             </p>
           ) : (
             <ul className='space-y-3'>
-              {filtered.map((e) => (
-                <li
-                  key={e.id}
-                  className='bg-white rounded-2xl shadow p-3 flex items-center justify-between'
-                >
-                  <div>
-                    <div className='font-medium'>{e.description || 'ללא תיאור'}</div>
-                    <div className='text-xs text-gray-500'>
-                      קטגוריה: {e.category} ·{' '}
-                      {new Date(e.occurred_on).toLocaleDateString('he-IL')} · שולם ע"י{' '}
-                      {e.payer_name || e.user_id}
+              {filtered.map((e) => {
+                const cents = toCents(e.amount_cents)
+                return (
+                  <li
+                    key={e.id}
+                    className='bg-white rounded-2xl shadow p-3 flex items-center justify-between'
+                  >
+                    <div>
+                      <div className='font-medium'>{e.description ?? 'ללא תיאור'}</div>
+                      <div className='text-xs text-gray-500'>
+                        קטגוריה: {e.category ?? '—'} ·{' '}
+                        {e.occurred_on ? new Date(e.occurred_on).toLocaleDateString('he-IL') : ''} · שולם ע"י{' '}
+                        {e.payer_name ?? e.user_id}
+                      </div>
                     </div>
-                  </div>
-                  <div className='text-right'>
-                    <div className='font-bold'>₪{(e.amount_cents / 100).toFixed(2)}</div>
-                    <div className='text-[11px] text-gray-500'>{e.currency}</div>
-                  </div>
-                </li>
-              ))}
+                    <div className='text-right'>
+                      <div className='font-bold'>₪{(cents / 100).toFixed(2)}</div>
+                      <div className='text-[11px] text-gray-500'>{e.currency ?? 'ILS'}</div>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </main>
       ) : (
-        <BalancesPanel members={members} expenses={expenses} currency="ILS" />
+        <BalancesPanel members={members} expenses={panelExpenses} currency="ILS" />
       )}
 
       {/* footer add */}
