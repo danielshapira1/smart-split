@@ -96,30 +96,30 @@ export default function App() {
       if (!session) return
       const uid = session.user.id
 
-      let gs: Group[] = []
-      try {
-        const { data, error } = await supabase
-          .from('groups')
-          .select(`
+      // יציב: שולפים קבוצות דרך memberships (בלי JOIN הפוך)
+      const { data, error } = await supabase
+        .from('memberships')
+        .select(`
+          group:groups (
             id,
             name,
             created_by,
             created_at,
-            creator:profiles!groups_created_by_fkey(display_name,email),
-            memberships!inner(user_id)
-          `)
-          .eq('memberships.user_id', uid)
+            creator:profiles!groups_created_by_fkey(display_name, email)
+          )
+        `)
+        .eq('user_id', uid)
 
-        if (error) throw error
-        gs = (data ?? []) as any as Group[]
-      } catch {
-        const { data: mems } = await supabase
-          .from('memberships')
-          .select('groups(*)')
-          .eq('user_id', uid)
-
-        gs = (mems ?? []).map((m: any) => m.groups).filter(Boolean)
+      if (error) {
+        console.warn('load groups via memberships failed:', error.message)
+        setGroups([])
+        setGroup(null)
+        return
       }
+
+      const gs = (data ?? [])
+        .map((row: any) => row.group)
+        .filter(Boolean) as Group[]
 
       setGroups(gs)
       setGroup(prev => {
