@@ -96,65 +96,46 @@ export default function App() {
       if (!session) return;
       const uid = session.user.id;
 
-      // ננסה נתיב יציב דרך memberships -> groups
-      // עם link-qualifier לשמות ה-FK:
-      //   memberships_group_id_fkey  (memberships.group_id -> groups.id)
-      //   groups_created_by_fkey     (groups.created_by  -> profiles.id)
       let gs: Group[] = [];
+
       try {
-        const { data, error } = await supabase
+        // שלב 1: כל group_id-ים מהחברויות של המשתמש
+        const { data: mems, error: e1 } = await supabase
           .from('memberships')
-          .select(
-            `
-            group:groups!memberships_group_id_fkey (
-              id, name, created_by, created_at,
-              creator:profiles!groups_created_by_fkey ( display_name, email )
-            )
-          `
-          )
+          .select('group_id')
           .eq('user_id', uid);
 
-        if (error) throw error;
+        if (e1) throw e1;
 
-        gs = (data ?? [])
-          .map((row: any) => row.group)
-          .filter(Boolean) as Group[];
-      } catch (e) {
-        console.warn('load groups via memberships failed:', (e as any)?.message);
+        const ids = [...new Set((mems ?? []).map(m => m.group_id).filter(Boolean))] as string[];
+        if (ids.length === 0) {
+          setGroups([]);
+          setGroup(null);
+          return;
+        }
 
-        // ניסיון פשוט יותר – בלי הטמעה של profiles (מונע 400 אם ה-FK creator לא מזוהה)
+        // שלב 2: משיכת פרטי קבוצות לפי ids (ללא JOIN)
+        const { data: rows, error: e2 } = await supabase
+          .from('groups')
+          .select('id,name,created_by,created_at')
+          .in('id', ids)
+          .order('created_at', { ascending: false });
+
+        if (e2) throw e2;
+
+        gs = (rows ?? []) as Group[];
+      } catch (err: any) {
+        console.warn('load groups (2-step) failed:', err?.message);
+        // ניסיון גיבוי: אם ה־schema כבר מסתדר, ננסה JOIN אחד (לא חובה)
         try {
-          const { data, error } = await supabase
-            .from('memberships')
-            .select(`group:groups!memberships_group_id_fkey ( id, name, created_by, created_at )`)
-            .eq('user_id', uid);
-
-          if (error) throw error;
-          gs = (data ?? [])
-            .map((row: any) => row.group)
-            .filter(Boolean) as Group[];
+          const { data } = await supabase
+            .from('groups')
+            .select('id,name,created_by,created_at,memberships!inner(user_id)')
+            .eq('memberships.user_id', uid);
+          gs = (data ?? []) as Group[];
         } catch (e2) {
-          console.warn('fallback memberships->groups failed:', (e2 as any)?.message);
-
-          // fallback אחרון: דרך groups עם פילטר by user_id (עובד כשיש JOIN מובנה ב־RLS)
-          try {
-            const { data, error } = await supabase
-              .from('groups')
-              .select(
-                `
-                id, name, created_by, created_at,
-                creator:profiles!groups_created_by_fkey ( display_name, email ),
-                memberships!inner ( user_id )
-              `
-              )
-              .eq('memberships.user_id', uid);
-
-            if (error) throw error;
-            gs = (data ?? []) as Group[];
-          } catch (e3) {
-            console.error('final groups fallback failed:', (e3 as any)?.message);
-            gs = [];
-          }
+          console.warn('fallback join failed:', (e2 as any)?.message);
+          gs = [];
         }
       }
 
@@ -164,7 +145,7 @@ export default function App() {
         return gs.find(g => g.id === pickId) ?? gs[0] ?? null;
       });
     },
-    [session]
+    [session?.user?.id]
   );
 
   /* ----- profile + groups ----- */
@@ -252,38 +233,52 @@ export default function App() {
   /* ----- load members for current group (לשמות בלבד) ----- */
   useEffect(() => {
     if (!group) {
-      setMembers([])
-      return
+      setMembers([]);
+      return;
     }
 
-    ;(async () => {
-      const { data, error } = await supabase
-        .from('memberships')
-        .select(`
-          user_id,
-          profiles:profiles!memberships_user_id_fkey (
-            id,
-            display_name,
-            email
-          )
-        `)
-        .eq('group_id', group.id)
+    (async () => {
+      try {
+        // קח user_id-ים של חברי הקבוצה
+        const { data: mems, error: e1 } = await supabase
+          .from('memberships')
+          .select('user_id')
+          .eq('group_id', group.id);
 
-      if (error) {
-        console.error('load members failed:', error.message)
-        setMembers([])
-        return
+        if (e1) throw e1;
+
+        const ids = [...new Set((mems ?? []).map(m => m.user_id).filter(Boolean))] as string[];
+        if (ids.length === 0) {
+          setMembers([]);
+          return;
+        }
+
+        // פרופילים לשמות/מייל
+        const { data: profs, error: e2 } = await supabase
+          .from('profiles')
+          .select('id, display_name, email')
+          .in('id', ids);
+
+        if (e2) throw e2;
+
+        const ms: Member[] = ids.map(uid => {
+          const p = (profs ?? []).find(pr => pr.id === uid);
+          return {
+            user_id: uid,
+            uid,
+            name: p?.display_name || p?.email || uid,
+            display_name: p?.display_name,
+            email: p?.email,
+          };
+        });
+
+        setMembers(ms);
+      } catch (err: any) {
+        console.error('load members failed:', err?.message);
+        setMembers([]);
       }
-
-      const ms: Member[] = (data ?? []).map((m: any) => ({
-        user_id: m.user_id,
-        uid: m.user_id,
-        name: m.profiles?.display_name || m.profiles?.email || m.user_id,
-      }))
-
-      setMembers(ms)
-    })()
-  }, [group])
+    })();
+  }, [group?.id]);
 
   /* ----- filters (לתצוגת הרשימה בלבד) ----- */
   const filtered = useMemo(() => {
