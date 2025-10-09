@@ -93,42 +93,79 @@ export default function App() {
   /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד ----- */
   const refreshGroups = React.useCallback(
     async (targetGroupId?: string | null) => {
-      if (!session) return
-      const uid = session.user.id
+      if (!session) return;
+      const uid = session.user.id;
 
-      // יציב: שולפים קבוצות דרך memberships (בלי JOIN הפוך)
-      const { data, error } = await supabase
-        .from('memberships')
-        .select(`
-          group:groups (
-            id,
-            name,
-            created_by,
-            created_at,
-            creator:profiles!groups_created_by_fkey(display_name, email)
+      // ננסה נתיב יציב דרך memberships -> groups
+      // עם link-qualifier לשמות ה-FK:
+      //   memberships_group_id_fkey  (memberships.group_id -> groups.id)
+      //   groups_created_by_fkey     (groups.created_by  -> profiles.id)
+      let gs: Group[] = [];
+      try {
+        const { data, error } = await supabase
+          .from('memberships')
+          .select(
+            `
+            group:groups!memberships_group_id_fkey (
+              id, name, created_by, created_at,
+              creator:profiles!groups_created_by_fkey ( display_name, email )
+            )
+          `
           )
-        `)
-        .eq('user_id', uid)
+          .eq('user_id', uid);
 
-      if (error) {
-        console.warn('load groups via memberships failed:', error.message)
-        setGroups([])
-        setGroup(null)
-        return
+        if (error) throw error;
+
+        gs = (data ?? [])
+          .map((row: any) => row.group)
+          .filter(Boolean) as Group[];
+      } catch (e) {
+        console.warn('load groups via memberships failed:', (e as any)?.message);
+
+        // ניסיון פשוט יותר – בלי הטמעה של profiles (מונע 400 אם ה-FK creator לא מזוהה)
+        try {
+          const { data, error } = await supabase
+            .from('memberships')
+            .select(`group:groups!memberships_group_id_fkey ( id, name, created_by, created_at )`)
+            .eq('user_id', uid);
+
+          if (error) throw error;
+          gs = (data ?? [])
+            .map((row: any) => row.group)
+            .filter(Boolean) as Group[];
+        } catch (e2) {
+          console.warn('fallback memberships->groups failed:', (e2 as any)?.message);
+
+          // fallback אחרון: דרך groups עם פילטר by user_id (עובד כשיש JOIN מובנה ב־RLS)
+          try {
+            const { data, error } = await supabase
+              .from('groups')
+              .select(
+                `
+                id, name, created_by, created_at,
+                creator:profiles!groups_created_by_fkey ( display_name, email ),
+                memberships!inner ( user_id )
+              `
+              )
+              .eq('memberships.user_id', uid);
+
+            if (error) throw error;
+            gs = (data ?? []) as Group[];
+          } catch (e3) {
+            console.error('final groups fallback failed:', (e3 as any)?.message);
+            gs = [];
+          }
+        }
       }
 
-      const gs = (data ?? [])
-        .map((row: any) => row.group)
-        .filter(Boolean) as Group[]
-
-      setGroups(gs)
+      setGroups(gs);
       setGroup(prev => {
-        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
-        return gs.find(g => g.id === pickId) ?? gs[0] ?? null
-      })
+        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null;
+        return gs.find(g => g.id === pickId) ?? gs[0] ?? null;
+      });
     },
     [session]
-  )
+  );
 
   /* ----- profile + groups ----- */
   useEffect(() => {
