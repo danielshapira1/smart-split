@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useEffect, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { LogOut, Plus } from 'lucide-react'
@@ -6,55 +7,14 @@ import { supabase, ensureProfileForCurrentUser } from './lib/supabaseClient'
 import { GroupSwitcher } from './components/GroupSwitcher'
 import { InviteButton } from './components/InviteButton'
 import { ExpenseForm } from './components/ExpenseForm'
-import BalancesPanel from './components/BalancesPanel'
+import BalancesPanel, { type Expense as BalExpense } from './components/BalancesPanel'
 import { useRealtimeExpenses } from './hooks/useRealtimeExpenses'
 
 import type { Group, Profile } from './lib/types'
 import type { Member } from './lib/settlements'
-import type { Expense as PanelExpense } from './components/BalancesPanel' // בשביל התאמה טיפוסית ל־BalancesPanel
-
-/* ---------- טיפוס הוצאה כפי שמגיע מה-DB/Hook (גמיש) ---------- */
-type Expense = {
-  id: string
-  group_id: string
-  user_id: string
-  amount_cents: number | string
-  currency?: string | null
-  description?: string | null
-  category?: string | null
-  occurred_on?: string | null
-  created_at?: string | null
-  payer_name?: string | null
-}
 
 const CATEGORIES = ['סופר', 'דלק', 'שכירות', 'בילויים', 'מסעדות', 'נסיעות', 'קניות', 'חשבונות', 'אחר']
 
-/* עזר: המרה בטוחה לסנטים */
-const toCents = (v: unknown) => {
-  const n =
-    typeof v === 'string'
-      ? Number.isFinite(+v) ? Math.round(parseFloat(v)) : 0
-      : Math.round((v as number) ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-/* המרה ל־Expense ש־BalancesPanel מצפה לו (מסיר null ומנרמל סנטים) */
-function normalizeExpense(e: Expense): PanelExpense {
-  return {
-    id: e.id,
-    group_id: e.group_id,
-    user_id: e.user_id,
-    amount_cents: toCents(e.amount_cents),
-    currency: e.currency ?? undefined,
-    description: e.description ?? undefined,
-    category: e.category ?? undefined,
-    occurred_on: e.occurred_on ?? undefined,
-    created_at: e.created_at ?? undefined,
-    payer_name: e.payer_name ?? undefined,
-  }
-}
-
-/* ---------- App ---------- */
 export default function App() {
   const [session, setSession] = useState<import('@supabase/supabase-js').Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -68,87 +28,81 @@ export default function App() {
   const [category, setCategory] = useState('')
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses')
 
-  // חברי הקבוצה למאזנים (לשמות בלבד — לא מסתמכים על זה לחישוב מספר משתתפים)
+  // לשמות בלבד (לא מסתמכים על זה לכמות משתתפים)
   const [members, setMembers] = useState<Member[]>([])
 
-  // --- ברכה לשם משתמש (זמין לכל המצבים) ---
+  // ברכה לשם משתמש
   const greetName = useMemo(
     () => profile?.display_name || session?.user?.email || 'אורח',
     [profile?.display_name, session?.user?.email]
   )
 
-  /* ----- auth ----- */
+  /* ---------- Auth ---------- */
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((_e, s) => setSession(s)).data
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
     return () => sub?.subscription?.unsubscribe?.()
   }, [])
 
-  // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
     if (!session) return
     ensureProfileForCurrentUser().catch(() => {})
   }, [session])
 
-  /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד ----- */
+  /* ---------- טעינת קבוצות (שני שלבים, ללא JOIN חוצה טבלאות) ---------- */
   const refreshGroups = React.useCallback(
     async (targetGroupId?: string | null) => {
-      if (!session) return;
-      const uid = session.user.id;
+      if (!session) return
+      const uid = session.user.id
 
-      let gs: Group[] = [];
-
+      let gs: Group[] = []
       try {
-        // שלב 1: כל group_id-ים מהחברויות של המשתמש
         const { data: mems, error: e1 } = await supabase
           .from('memberships')
           .select('group_id')
-          .eq('user_id', uid);
+          .eq('user_id', uid)
 
-        if (e1) throw e1;
-
-        const ids = [...new Set((mems ?? []).map(m => m.group_id).filter(Boolean))] as string[];
+        if (e1) throw e1
+        const ids = [...new Set((mems ?? []).map(m => m.group_id).filter(Boolean))] as string[]
         if (ids.length === 0) {
-          setGroups([]);
-          setGroup(null);
-          return;
+          setGroups([])
+          setGroup(null)
+          return
         }
 
-        // שלב 2: משיכת פרטי קבוצות לפי ids (ללא JOIN)
         const { data: rows, error: e2 } = await supabase
           .from('groups')
           .select('id,name,created_by,created_at')
           .in('id', ids)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
 
-        if (e2) throw e2;
-
-        gs = (rows ?? []) as Group[];
+        if (e2) throw e2
+        gs = (rows ?? []) as Group[]
       } catch (err: any) {
-        console.warn('load groups (2-step) failed:', err?.message);
-        // ניסיון גיבוי: אם ה־schema כבר מסתדר, ננסה JOIN אחד (לא חובה)
+        console.warn('load groups failed (2-step):', err?.message)
+        // fallback אם בעתיד יחזור לעבוד ה־JOIN:
         try {
           const { data } = await supabase
             .from('groups')
             .select('id,name,created_by,created_at,memberships!inner(user_id)')
-            .eq('memberships.user_id', uid);
-          gs = (data ?? []) as Group[];
+            .eq('memberships.user_id', session.user.id)
+          gs = (data ?? []) as Group[]
         } catch (e2) {
-          console.warn('fallback join failed:', (e2 as any)?.message);
-          gs = [];
+          console.warn('fallback join failed:', (e2 as any)?.message)
+          gs = []
         }
       }
 
-      setGroups(gs);
+      setGroups(gs)
       setGroup(prev => {
-        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null;
-        return gs.find(g => g.id === pickId) ?? gs[0] ?? null;
-      });
+        const pickId = targetGroupId ?? prev?.id ?? gs[0]?.id ?? null
+        return gs.find(g => g.id === pickId) ?? gs[0] ?? null
+      })
     },
     [session?.user?.id]
-  );
+  )
 
-  /* ----- profile + groups ----- */
+  /* ---------- Profile + Groups ---------- */
   useEffect(() => {
     if (!session) return
     ;(async () => {
@@ -163,26 +117,25 @@ export default function App() {
     })()
   }, [session, refreshGroups])
 
-  /* ----- Realtime על memberships של המשתמש ----- */
+  /* ---------- Realtime memberships ---------- */
   useEffect(() => {
-    if (!session) return
-    const uid = session.user.id
+    if (!session) return;
+    const uid = session.user.id;
 
     const ch = supabase
       .channel(`mems:${uid}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${uid}` },
-        () => refreshGroups(null)
+        () => { void refreshGroups(null); }   // לא מחזיר Promise
       )
-      .subscribe()
+      .subscribe();
 
-    return () => {
-      supabase.removeChannel(ch)
-    }
-  }, [session, refreshGroups])
+  // cleanup: לא להחזיר Promise
+  return () => { supabase.removeChannel(ch); };
+}, [session, refreshGroups]);
 
-  /* ----- role for current group ----- */
+  /* ---------- Role ---------- */
   useEffect(() => {
     if (!session || !group) {
       setRole('member')
@@ -205,7 +158,7 @@ export default function App() {
     })()
   }, [session?.user?.id, group?.id])
 
-  /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN)  ----- */
+  /* ---------- קבלה אוטומטית מהזמנה בקישור ---------- */
   useEffect(() => {
     if (!session) return
     const url = new URL(window.location.href)
@@ -219,108 +172,96 @@ export default function App() {
       } else {
         await refreshGroups(data?.group_id ?? null)
       }
-
       url.searchParams.delete('invite')
       window.history.replaceState({}, '', url.toString())
     })()
   }, [session, refreshGroups])
 
-  /* ----- realtime expenses ----- */
-  const { expenses, refresh } = useRealtimeExpenses(group?.id) as {
-    expenses: Expense[]; refresh: () => void
-  }
+  /* ---------- הוצאות בזמן אמת ---------- */
+  const { expenses, refresh } = useRealtimeExpenses(group?.id)
+  // החתמה לטייפ של BalancesPanel – מונעת חוסר תאימות TypeScript בין כמה הגדרות Expense
+  const expensesForPanel = (expenses ?? []) as BalExpense[]
 
-  /* ----- load members for current group (לשמות בלבד) ----- */
+  /* ---------- חברי קבוצה לשמות (ללא JOIN) ---------- */
   useEffect(() => {
     if (!group) {
-      setMembers([]);
-      return;
+      setMembers([])
+      return
     }
-
-    (async () => {
+    ;(async () => {
       try {
-        // קח user_id-ים של חברי הקבוצה
         const { data: mems, error: e1 } = await supabase
           .from('memberships')
           .select('user_id')
-          .eq('group_id', group.id);
+          .eq('group_id', group.id)
+        if (e1) throw e1
 
-        if (e1) throw e1;
-
-        const ids = [...new Set((mems ?? []).map(m => m.user_id).filter(Boolean))] as string[];
+        const ids = [...new Set((mems ?? []).map(m => m.user_id).filter(Boolean))] as string[]
         if (ids.length === 0) {
-          setMembers([]);
-          return;
+          setMembers([])
+          return
         }
 
-        // פרופילים לשמות/מייל
         const { data: profs, error: e2 } = await supabase
           .from('profiles')
           .select('id, display_name, email')
-          .in('id', ids);
-
-        if (e2) throw e2;
+          .in('id', ids)
+        if (e2) throw e2
 
         const ms: Member[] = ids.map(uid => {
-          const p = (profs ?? []).find(pr => pr.id === uid);
+          const p = (profs ?? []).find(pr => pr.id === uid)
           return {
             user_id: uid,
             uid,
             name: p?.display_name || p?.email || uid,
             display_name: p?.display_name,
             email: p?.email,
-          };
-        });
-
-        setMembers(ms);
+          }
+        })
+        setMembers(ms)
       } catch (err: any) {
-        console.error('load members failed:', err?.message);
-        setMembers([]);
+        console.error('load members failed:', err?.message)
+        setMembers([])
       }
-    })();
-  }, [group?.id]);
+    })()
+  }, [group?.id])
 
-  /* ----- filters (לתצוגת הרשימה בלבד) ----- */
+  /* ---------- סינון לתצוגת הרשימה בלבד ---------- */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return expenses.filter((e) => {
-      const okCat = !category || (e.category ?? '') === category
+    return (expenses ?? []).filter((e) => {
+      const okCat = !category || e.category === category
       const okSearch = !q || (e.description ?? '').toLowerCase().includes(q)
       return okCat && okSearch
     })
   }, [expenses, search, category])
 
-  /* ---------- סיכום למעלה: “מי חייב למי” ---------- */
+  /* ---------- סיכום עליון “מי חייב למי” ---------- */
   const meId = session?.user?.id ?? ''
 
   const participantIds = useMemo(() => {
     const s = new Set<string>()
-    for (const e of expenses) if (e.user_id) s.add(e.user_id)
+    for (const e of expenses ?? []) if (e.user_id) s.add(e.user_id)
     return Array.from(s)
   }, [expenses])
 
   const isPair = participantIds.length === 2
-
-  const otherId = useMemo(() => {
-    if (!isPair) return ''
-    return participantIds.find(id => id !== meId) || ''
-  }, [isPair, participantIds, meId])
+  const otherId = useMemo(() => (isPair ? participantIds.find(id => id !== meId) || '' : ''), [isPair, participantIds, meId])
 
   const otherName = useMemo(() => {
     if (!otherId) return 'המשתתף/ת השני/ה'
     const m = members.find(x => x.user_id === otherId)
     if (m?.name) return m.name
-    const exp = expenses.find(e => e.user_id === otherId && e.payer_name)
-    return (exp?.payer_name ?? undefined) || otherId
+    const exp = (expenses ?? []).find(e => e.user_id === otherId && e.payer_name)
+    return exp?.payer_name || otherId
   }, [otherId, members, expenses])
 
   const totalCentsAll = useMemo(
-    () => expenses.reduce((sum, e) => sum + toCents(e.amount_cents), 0),
+    () => (expenses ?? []).reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
     [expenses]
   )
   const myPaidAll = useMemo(
-    () => expenses.filter(e => e.user_id === meId)
-                  .reduce((sum, e) => sum + toCents(e.amount_cents), 0),
+    () => (expenses ?? []).filter(e => e.user_id === meId).reduce((s, e) => s + (e?.amount_cents ?? 0), 0),
     [expenses, meId]
   )
 
@@ -330,28 +271,21 @@ export default function App() {
 
   const summaryText = useMemo(() => {
     if (!group) return ''
-    if (expenses.length === 0) return 'אין הוצאות להצגה'
-
+    if ((expenses ?? []).length === 0) return 'אין הוצאות להצגה'
     const abs = Math.abs(netCents) / 100
     if (netCents > 0) {
-      return isPair
-        ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}`
-        : `את/ה חייב/ת לקבוצה ₪${abs.toFixed(2)}`
+      return isPair ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}` : `את/ה חייב/ת לקבוצה ₪${abs.toFixed(2)}`
     }
     if (netCents < 0) {
-      return isPair
-        ? `${otherName} חייב/ת לך ₪${abs.toFixed(2)}`
-        : `הקבוצה חייבת לך ₪${abs.toFixed(2)}`
+      return isPair ? `${otherName} חייב/ת לך ₪${abs.toFixed(2)}` : `הקבוצה חייבת לך ₪${abs.toFixed(2)}`
     }
     return 'מאוזנים'
-  }, [group, expenses.length, netCents, isPair, otherName])
+  }, [group, expenses, netCents, isPair, otherName])
 
   const currentPayerName =
-    profile?.display_name ||
-    profile?.email ||
-    (session?.user?.email ?? 'משתמש')
+    profile?.display_name || profile?.email || (session?.user?.email ?? 'משתמש')
 
-  /* ----- actions ----- */
+  /* ---------- Actions ---------- */
   const signOut = async () => {
     await supabase.auth.signOut()
   }
@@ -364,9 +298,8 @@ export default function App() {
       const rpc = await supabase.rpc('create_group', { p_name: name })
       const row = (rpc as any)?.data as Group | null
       const error = (rpc as any)?.error as { message?: string } | null
-
       if (!error && row) {
-        setGroups((prev) => [row, ...prev])
+        setGroups(prev => [row, ...prev])
         setGroup(row)
         setRole('owner')
         return
@@ -379,19 +312,17 @@ export default function App() {
         .insert({ name })
         .select('*')
         .maybeSingle()
-
       if (e1 || !gRaw) throw e1 ?? new Error('יצירת קבוצה נכשלה')
-      const g = gRaw as Group
 
+      const g = gRaw as Group
       const { error: e2 } = await supabase.from('memberships').insert({
         group_id: g.id,
         user_id: session.user.id,
         role: 'owner',
       })
-
       if (e2) console.warn('הוספת חברות נכשלה:', e2.message)
 
-      setGroups((prev) => [g, ...prev])
+      setGroups(prev => [g, ...prev])
       setGroup(g)
       setRole('owner')
     } catch (err: any) {
@@ -400,7 +331,7 @@ export default function App() {
     }
   }
 
-  /* ----- guards ----- */
+  /* ---------- Guards ---------- */
   if (!session) return <AuthScreen />
 
   if (!group) {
@@ -414,14 +345,9 @@ export default function App() {
           </button>
         </header>
 
-        <div className='flex-1 flex flex-col items-center justify-center gap-4 px-4'>
-          <p className='text-gray-600 text-center'>
-            אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.
-          </p>
-          <button
-            className='rounded-full bg-black text-white px-4 py-2'
-            onClick={createGroup}
-          >
+        <div className='flex-1 flex flex-col items-center justify-center gap-4 px-4 text-center'>
+          <p className='text-gray-600'>אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.</p>
+          <button className='rounded-full bg-black text-white px-4 py-2' onClick={createGroup}>
             צור קבוצה חדשה
           </button>
         </div>
@@ -429,13 +355,7 @@ export default function App() {
     )
   }
 
-  /* ---------- exp array מנורמל ל־BalancesPanel ---------- */
-  const panelExpenses: PanelExpense[] = useMemo(
-    () => expenses.map(normalizeExpense),
-    [expenses]
-  )
-
-  /* ---------- render with group ---------- */
+  /* ---------- Render with group ---------- */
   return (
     <div className='max-w-md mx-auto h-full flex flex-col'>
       {/* header */}
@@ -445,7 +365,7 @@ export default function App() {
           current={group}
           onSelect={setGroup}
           onCreated={(g) => {
-            setGroups((prev) => [g, ...prev])
+            setGroups(prev => [g, ...prev])
             setGroup(g)
           }}
         />
@@ -456,12 +376,10 @@ export default function App() {
         </button>
       </header>
 
-      {/* top summary line */}
-      <div className='px-4 pt-2 text-sm text-gray-600'>
-        {summaryText}
-      </div>
+      {/* top summary */}
+      <div className='px-4 pt-2 text-sm text-gray-600'>{summaryText}</div>
 
-      {/* search + filter */}
+      {/* filters */}
       <div className='px-4 pt-3 flex gap-2'>
         <input
           value={search}
@@ -475,10 +393,8 @@ export default function App() {
           className='rounded-xl border px-3 py-2 text-sm outline-none'
         >
           <option value=''>כל הקטגוריות</option>
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+          {CATEGORIES.map(c => (
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
       </div>
@@ -487,19 +403,13 @@ export default function App() {
       <nav className='px-4 pt-2 flex gap-2'>
         <button
           onClick={() => setTab('expenses')}
-          className={clsx(
-            'px-3 py-2 rounded-full text-sm',
-            tab === 'expenses' ? 'bg-black text-white' : 'bg-slate-100'
-          )}
+          className={clsx('px-3 py-2 rounded-full text-sm', tab === 'expenses' ? 'bg-black text-white' : 'bg-slate-100')}
         >
           הוצאות
         </button>
         <button
           onClick={() => setTab('balances')}
-          className={clsx(
-            'px-3 py-2 rounded-full text-sm',
-            tab === 'balances' ? 'bg-black text-white' : 'bg-slate-100'
-          )}
+          className={clsx('px-3 py-2 rounded-full text-sm', tab === 'balances' ? 'bg-black text-white' : 'bg-slate-100')}
         >
           מאזנים
         </button>
@@ -509,38 +419,28 @@ export default function App() {
       {tab === 'expenses' ? (
         <main className='flex-1 overflow-y-auto px-4 py-3'>
           {filtered.length === 0 ? (
-            <p className='text-gray-500 text-center mt-10'>
-              אין הוצאות — לחץ על הפלוס למטה כדי להוסיף.
-            </p>
+            <p className='text-gray-500 text-center mt-10'>אין הוצאות — לחץ על הפלוס למטה כדי להוסיף.</p>
           ) : (
             <ul className='space-y-3'>
-              {filtered.map((e) => {
-                const cents = toCents(e.amount_cents)
-                return (
-                  <li
-                    key={e.id}
-                    className='bg-white rounded-2xl shadow p-3 flex items-center justify-between'
-                  >
-                    <div>
-                      <div className='font-medium'>{e.description ?? 'ללא תיאור'}</div>
-                      <div className='text-xs text-gray-500'>
-                        קטגוריה: {e.category ?? '—'} ·{' '}
-                        {e.occurred_on ? new Date(e.occurred_on).toLocaleDateString('he-IL') : ''} · שולם ע"י{' '}
-                        {e.payer_name ?? e.user_id}
-                      </div>
+              {filtered.map((e) => (
+                <li key={e.id} className='bg-white rounded-2xl shadow p-3 flex items-center justify-between'>
+                  <div>
+                    <div className='font-medium'>{e.description || 'ללא תיאור'}</div>
+                    <div className='text-xs text-gray-500'>
+                      קטגוריה: {e.category} · {new Date(e.occurred_on).toLocaleDateString('he-IL')} · שולם ע"י {e.payer_name || e.user_id}
                     </div>
-                    <div className='text-right'>
-                      <div className='font-bold'>₪{(cents / 100).toFixed(2)}</div>
-                      <div className='text-[11px] text-gray-500'>{e.currency ?? 'ILS'}</div>
-                    </div>
-                  </li>
-                )
-              })}
+                  </div>
+                  <div className='text-right'>
+                    <div className='font-bold'>₪{(e.amount_cents / 100).toFixed(2)}</div>
+                    <div className='text-[11px] text-gray-500'>{e.currency}</div>
+                  </div>
+                </li>
+              ))}
             </ul>
           )}
         </main>
       ) : (
-        <BalancesPanel members={members} expenses={panelExpenses} currency="ILS" />
+        <BalancesPanel members={members} expenses={expensesForPanel} currency="ILS" />
       )}
 
       {/* footer add */}
@@ -550,9 +450,7 @@ export default function App() {
             <div className='text-gray-600 text-sm' />
             <button
               onClick={() => setShowForm(true)}
-              className={clsx(
-                'px-4 py-2 rounded-full shadow bg-black text-white flex items-center gap-1 active:scale-[.98]'
-              )}
+              className='px-4 py-2 rounded-full shadow bg-black text-white flex items-center gap-1 active:scale-[.98]'
             >
               <Plus className='w-4 h-4' /> הוסף הוצאה
             </button>
@@ -611,10 +509,7 @@ function AuthScreen() {
       <h1 className='text-2xl font-bold mb-2'>הוצאות ביחד</h1>
       <p className='text-gray-500 mb-6 text-center'>התחברות מהירה</p>
       <div className='w-full space-y-3'>
-        <button
-          onClick={google}
-          className='w-full rounded-xl bg-red-600 text-white py-3 font-medium active:scale-[.99]'
-        >
+        <button onClick={google} className='w-full rounded-xl bg-red-600 text-white py-3 font-medium active:scale-[.99]'>
           התחברות עם Google
         </button>
         <div className='text-center text-xs text-gray-500'>או התחברות עם קישור למייל</div>
