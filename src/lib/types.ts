@@ -1,5 +1,4 @@
-// טיפוסים אחידים לכל האפליקציה
-
+// src/lib/types.ts
 export type Profile = {
   id: string;
   email: string | null;
@@ -14,22 +13,20 @@ export type Group = {
   created_at?: string;
 };
 
-// סכום נשמר תמיד בסנטים (מספר שלם)
 export type Expense = {
   id: string;
   group_id: string;
   user_id: string;
-  amount_cents: number;      // ALWAYS number (parsed)
-  currency: string;
+  amount_cents: number;
+  currency: string | null;
   description: string | null;
   category: string | null;
   occurred_on: string;
-  created_at?: string;
-  payer_name?: string | null; // display_name/email של המשלם לצורך תצוגה
-};
+  created_at: string;
 
-// לשימוש במסכי מאזן/קבוצה
-export type Member = {
-  uid: string;
-  name: string; // display_name/email/fallback uid
+  // מה-join ל-profiles דרך FK: expenses.user_id -> profiles.id
+  payer?: { display_name: string | null; email: string | null } | null;
+
+  // תאימות לאחור אם נשמר בעבר שם משלם בעמודה נפרדת
+  payer_name?: string | null;
 };
