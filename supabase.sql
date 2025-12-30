@@ -1,5 +1,31 @@
 -- ============================================================================
 -- Supabase schema for "shared expenses" (secure by default)
+-- CLEAN SLATE VERSION: DROPS EVERYTHING FIRST!
+-- ============================================================================
+
+-- 1. DROP EXISTING VIEWS
+drop view if exists public.net_balances cascade;
+drop view if exists public.expenses_with_names cascade;
+
+-- 2. DROP EXISTING TABLES (Reverse dependency order to avoid FK errors)
+drop table if exists public.transfers cascade;
+drop table if exists public.expenses cascade;
+drop table if exists public.invites cascade;
+drop table if exists public.memberships cascade;
+drop table if exists public.groups cascade;
+-- We can drop profiles, but remember this deletes user profile data!
+drop table if exists public.profiles cascade;
+
+-- 3. DROP FUNCTIONS & TRIGGERS
+drop trigger if exists on_auth_user_created on auth.users cascade;
+drop function if exists public.handle_new_user() cascade;
+drop function if exists public.create_group(text) cascade;
+drop function if exists public.create_invite(uuid, text) cascade;
+drop function if exists public.accept_invite(uuid) cascade;
+drop function if exists public.join_group_token(uuid) cascade;
+
+-- ============================================================================
+-- RE-CREATE EVERYTHING
 -- ============================================================================
 
 -- Extensions
@@ -31,7 +57,6 @@ begin
 end;
 $$;
 
-drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user();
@@ -42,13 +67,13 @@ for each row execute procedure public.handle_new_user();
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
-  created_by  uuid references auth.users(id),
+  created_by  uuid references public.profiles(id), 
   created_at  timestamptz default now()
 );
 
 create table if not exists public.memberships (
   group_id   uuid references public.groups(id) on delete cascade,
-  user_id    uuid references auth.users(id)    on delete cascade,
+  user_id    uuid references public.profiles(id) on delete cascade,
   role       text not null default 'member', -- 'owner' | 'admin' | 'member'
   created_at timestamptz default now(),
   primary key (group_id, user_id)
@@ -61,8 +86,8 @@ create table if not exists public.invites (
   token        uuid primary key default gen_random_uuid(),
   group_id     uuid not null references public.groups(id) on delete cascade,
   invited_role text not null default 'member',
-  inviter      uuid references auth.users(id),
-  used_by      uuid references auth.users(id),
+  inviter      uuid references public.profiles(id),
+  used_by      uuid references public.profiles(id),
   used_at      timestamptz,
   expires_at   timestamptz default now() + interval '14 days',
   created_at   timestamptz default now()
@@ -132,7 +157,7 @@ $$;
 create table if not exists public.expenses (
   id           uuid primary key default gen_random_uuid(),
   group_id     uuid not null references public.groups(id) on delete cascade,
-  user_id      uuid not null references auth.users(id)   on delete cascade, -- payer
+  user_id      uuid not null references public.profiles(id) on delete cascade, 
   amount_cents integer not null check (amount_cents > 0),
   currency     text not null default 'ILS',
   description  text default '',
@@ -151,8 +176,8 @@ create index if not exists idx_expenses_group_occurred on public.expenses (group
 create table if not exists public.transfers (
   id           uuid primary key default gen_random_uuid(),
   group_id     uuid not null references public.groups(id) on delete cascade,
-  from_user    uuid not null references auth.users(id),
-  to_user      uuid not null references auth.users(id),
+  from_user    uuid not null references public.profiles(id),
+  to_user      uuid not null references public.profiles(id),
   amount_cents integer not null check (amount_cents > 0),
   note         text default '',
   created_at   timestamptz default now()
@@ -161,13 +186,11 @@ create table if not exists public.transfers (
 -- ============================================================================
 -- VIEWS
 -- ============================================================================
--- Payer display name
 create or replace view public.expenses_with_names as
 select e.*, coalesce(p.display_name, p.email) as payer_name
 from public.expenses e
 left join public.profiles p on p.id = e.user_id;
 
--- Net balances per user in group (equal split among current members)
 create or replace view public.net_balances as
 with members as (
   select g.id as group_id, m.user_id
@@ -232,7 +255,7 @@ create policy "update own profile"
 on public.profiles for update
 using (auth.uid() = id);
 
--- Groups (קריאה: חברים בלבד + היוצר)
+-- Groups
 drop policy if exists "select groups for members" on public.groups;
 create policy "select groups for members"
 on public.groups for select
@@ -249,7 +272,6 @@ create policy "select groups for creator"
 on public.groups for select
 using (created_by = auth.uid());
 
--- לא נאפשר Insert/Update/Delete ישיר ל-groups: שימוש דרך RPC בלבד
 revoke insert, update, delete on public.groups from anon, authenticated;
 
 -- Memberships
@@ -276,7 +298,6 @@ using (
   )
 );
 
--- להגביל גם כאן פעולות ישירות: נעדיף RPC
 revoke insert, update, delete on public.memberships from anon, authenticated;
 
 -- Invites
@@ -397,7 +418,7 @@ using (
 );
 
 -- ============================================================================
--- BASE GRANTS (RLS still controls row access)
+-- BASE GRANTS
 -- ============================================================================
 grant select on table public.groups       to anon, authenticated;
 grant select on table public.memberships  to anon, authenticated;
@@ -408,7 +429,7 @@ grant select on table public.invites      to anon, authenticated;
 grant usage  on schema public             to anon, authenticated;
 
 -- ============================================================================
--- RPC: create_group(p_name text) → מחזיר את השורה המלאה של הקבוצה
+-- RPC: create_group
 -- ============================================================================
 create or replace function public.create_group(p_name text)
 returns public.groups
@@ -433,7 +454,6 @@ begin
   values (gen_random_uuid(), trim(p_name), v_uid, now())
   returning id into v_gid;
 
-  -- לצרף את היוצר כבעלים (Idempotent הודות ל-PK (group_id,user_id))
   insert into public.memberships (group_id, user_id, role, created_at)
   values (v_gid, v_uid, 'owner', now())
   on conflict (group_id, user_id) do update
@@ -446,7 +466,9 @@ $$;
 
 grant execute on function public.create_group(text) to anon, authenticated;
 
--- פונקציית הצטרפות שמחזירה תשובה מפורטת
+-- ============================================================================
+-- RPC: join_group_token
+-- ============================================================================
 create or replace function public.join_group_token(p_token uuid)
 returns jsonb
 language plpgsql
@@ -457,7 +479,6 @@ declare
   v_inv   public.invites%rowtype;
   v_gname text;
 begin
-  -- מאתרים הזמנה תקפה
   select * into v_inv
   from public.invites
   where token = p_token
@@ -468,12 +489,10 @@ begin
     return jsonb_build_object('joined', false, 'reason', 'invalid_or_expired');
   end if;
 
-  -- מצרפים כחבר (Idempotent)
   insert into public.memberships (group_id, user_id, role)
   values (v_inv.group_id, auth.uid(), v_inv.invited_role)
   on conflict (group_id, user_id) do nothing;
 
-  -- מסמנים שהוזמן נוצל
   update public.invites
      set used_by = auth.uid(), used_at = now()
    where token = p_token and used_by is null;
@@ -487,9 +506,7 @@ begin
   );
 
 exception when others then
-  -- לא לבלוע בשקט – נחזיר reason מפורט לקליינט
   return jsonb_build_object('joined', false, 'reason', sqlerrm);
 end $$;
 
 grant execute on function public.join_group_token(uuid) to anon, authenticated;
-

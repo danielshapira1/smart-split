@@ -103,3 +103,11 @@ export async function saveExpenseRow(exp: ExpenseInsert): Promise<void> {
   });
   if (!res.ok) throw new Error(await res.text());
 }
+
+// מחיקת הוצאה
+export async function deleteExpense(id: string): Promise<void> {
+  const res = await rest(`/rest/v1/expenses?id=eq.${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await res.text());
+}

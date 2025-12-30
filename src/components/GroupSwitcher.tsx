@@ -1,15 +1,16 @@
 import React from 'react'
+import { Plus } from 'lucide-react'
 import type { Group } from '../lib/types'
 
 type Props = {
   groups: Group[]
   current: Group | null
   onSelect: (g: Group) => void
-  /** ייקרא מההורה אחרי שנוצרה קבוצה חדשה, ומקבל את הקבוצה שנוצרה */
   onCreated?: (g: Group) => void
+  onCreateNew?: () => void
 }
 
-export function GroupSwitcher({ groups, current, onSelect }: Props) {
+export function GroupSwitcher({ groups, current, onSelect, onCreateNew }: Props) {
   return (
     <div className="flex items-center gap-2">
       <select
@@ -31,6 +32,16 @@ export function GroupSwitcher({ groups, current, onSelect }: Props) {
           </option>
         ))}
       </select>
+
+      {onCreateNew && (
+        <button
+          onClick={onCreateNew}
+          className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700"
+          title="צור קבוצה חדשה"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      )}
     </div>
   )
 }

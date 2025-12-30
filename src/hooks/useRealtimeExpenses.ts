@@ -20,8 +20,7 @@ export function useRealtimeExpenses(groupId?: string | null) {
       .select(`
         id, group_id, user_id, amount_cents, currency,
         description, category, occurred_on, created_at,
-        payer:profiles!expenses_user_id_fkey(display_name,email),
-        payer_name
+        payer:profiles(display_name,email)
       `)
       .eq('group_id', groupId)
       .order('occurred_on', { ascending: false });

@@ -1,9 +1,10 @@
 // src/App.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { LogOut, Plus } from 'lucide-react';
+import { LogOut, Plus, Trash2 } from 'lucide-react';
 
 import { supabase, ensureProfileForCurrentUser } from './lib/supabaseClient';
+import { deleteExpense } from './lib/supaRest';
 import { GroupSwitcher } from './components/GroupSwitcher';
 import { InviteButton } from './components/InviteButton';
 import { ExpenseForm } from './components/ExpenseForm';
@@ -56,6 +57,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses');
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
 
   // חברי הקבוצה למאזנים (שמות בלבד — לא מסתמכים על זה למספר משתתפים)
   const [members, setMembers] = useState<Member[]>([]);
@@ -76,7 +78,7 @@ export default function App() {
   // ודא שקיים פרופיל לאחר התחברות
   useEffect(() => {
     if (!session) return;
-    ensureProfileForCurrentUser().catch(() => {});
+    ensureProfileForCurrentUser().catch(() => { });
   }, [session]);
 
   /* ----- helper: ריענון קבוצות ובחירת קבוצה יעד ----- */
@@ -357,7 +359,7 @@ export default function App() {
         setRole('owner');
         return;
       }
-    } catch {}
+    } catch { }
 
     // fallback ישיר לטבלאות
     try {
@@ -384,6 +386,17 @@ export default function App() {
     } catch (err: any) {
       console.error('[createGroup] error', err);
       alert(err?.message ?? 'יצירת קבוצה נכשלה');
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!expenseToDelete) return;
+    try {
+      await deleteExpense(expenseToDelete.id);
+      setExpenseToDelete(null);
+      refresh(); // refresh list
+    } catch (err: any) {
+      alert('שגיאה במחיקת הוצאה: ' + err.message);
     }
   };
 
@@ -427,6 +440,7 @@ export default function App() {
             setGroups((prev) => [g, ...prev]);
             setGroup(g);
           }}
+          onCreateNew={createGroup}
         />
         <div className="ms-auto me-2 text-sm text-gray-700">שלום, {greetName}</div>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
@@ -511,6 +525,16 @@ export default function App() {
                       <div className="font-bold">₪{(e.amount_cents / 100).toFixed(2)}</div>
                       <div className="text-[11px] text-gray-500">{e.currency || 'ILS'}</div>
                     </div>
+
+                    {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
+                      <button
+                        onClick={() => setExpenseToDelete(e)}
+                        className="mr-3 text-red-400 hover:text-red-600 p-2 -ml-2"
+                        title="מחק הוצאה"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -550,6 +574,32 @@ export default function App() {
             refresh();
           }}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {expenseToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-gray-900">מחיקת הוצאה</h3>
+            <p className="text-gray-600">
+              אתה בטוח שאתה רוצה למחוק את ההוצאה "{expenseToDelete.description || 'ללא תיאור'}"?
+            </p>
+            <div className="flex gap-3 justify-end mt-4">
+              <button
+                onClick={() => setExpenseToDelete(null)}
+                className="px-4 py-2 rounded-xl text-gray-600 hover:bg-gray-100 font-medium"
+              >
+                ביטול
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700 font-medium shadow"
+              >
+                מחק
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
