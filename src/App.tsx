@@ -201,11 +201,16 @@ export default function App() {
   }, [session?.user?.id, group?.id]);
 
   /* ----- קבלה מהירה של הזמנה מה-URL (?invite=TOKEN) ----- */
+  const processingInvite = React.useRef(false);
+
   useEffect(() => {
     if (!session) return;
     const url = new URL(window.location.href);
     const token = url.searchParams.get('invite');
     if (!token) return;
+
+    if (processingInvite.current) return;
+    processingInvite.current = true;
 
     (async () => {
       // Fix: ensure profile exists before accepting invite (avoid FK error)
@@ -217,13 +222,21 @@ export default function App() {
 
       const { data, error } = await supabase.rpc('accept_invite', { p_token: token });
       if (error) {
-        alert('שגיאה בהצטרפות לקבוצה: ' + error.message);
+        // אם השגיאה היא שהמשתמש כבר בקבוצה - זה לא באמת כישלון קריטי
+        if (error.message?.includes('violates unique constraint "memberships_pkey"')) {
+          // התעלמות או הודעה עדינה
+          console.log('Already a member');
+        } else {
+          alert('שגיאה בהצטרפות לקבוצה: ' + error.message);
+        }
+        processingInvite.current = false; // allow retry if failed? or keep blocked? Usually keep blocked if token is one-time.
       } else {
         await refreshGroups(data?.group_id ?? null);
       }
 
       url.searchParams.delete('invite');
       window.history.replaceState({}, '', url.toString());
+      processingInvite.current = false;
     })();
   }, [session, refreshGroups]);
 
