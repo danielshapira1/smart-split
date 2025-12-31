@@ -208,6 +208,13 @@ export default function App() {
     if (!token) return;
 
     (async () => {
+      // Fix: ensure profile exists before accepting invite (avoid FK error)
+      try {
+        await ensureProfileForCurrentUser();
+      } catch (err) {
+        console.warn('ensureProfileForCurrentUser failed:', err);
+      }
+
       const { data, error } = await supabase.rpc('accept_invite', { p_token: token });
       if (error) {
         alert('שגיאה בהצטרפות לקבוצה: ' + error.message);
