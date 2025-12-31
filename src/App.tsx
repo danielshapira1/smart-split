@@ -549,7 +549,7 @@ export default function App() {
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
                       <button
                         onClick={() => setExpenseToDelete(e)}
-                        className="mr-3 text-zinc-600 hover:text-red-400 p-2 -ml-2 transition-colors"
+                        className="mr-3 text-red-400 hover:text-red-300 p-2 -ml-2 transition-colors"
                         title="מחק הוצאה"
                       >
                         <Trash2 className="w-4 h-4" />
