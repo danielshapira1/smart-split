@@ -33,8 +33,8 @@ export default function ExpenseItem({ expense, canEdit, onEdit, onDeleted }: Pro
       }}
     >
       <div className="min-w-0">
-        <div className="font-medium truncate">{expense.description || 'ללא תיאור'}</div>
-        <div className="text-xs text-gray-500 truncate">
+        <div className="font-medium truncate text-zinc-100">{expense.description || 'ללא תיאור'}</div>
+        <div className="text-xs text-zinc-400 truncate">
           קטגוריה: {expense.category || '—'} · {new Date(expense.occurred_on).toLocaleDateString('he-IL')} ·{' '}
           שולם ע״י <UserChip uid={expense.user_id} name={payer} />
         </div>
@@ -42,15 +42,15 @@ export default function ExpenseItem({ expense, canEdit, onEdit, onDeleted }: Pro
 
       <div className="flex items-center gap-3">
         <div className="text-right">
-          <div className="font-bold">{formatILS(expense.amount_cents)}</div>
-          <div className="text-[11px] text-gray-500">{expense.currency}</div>
+          <div className="font-bold text-zinc-100">{formatILS(expense.amount_cents)}</div>
+          <div className="text-[11px] text-zinc-500">{expense.currency}</div>
         </div>
         {canEdit && (
           <>
-            <button className="text-gray-500 hover:text-black" onClick={() => onEdit(expense)} title="עריכה">
+            <button className="text-zinc-500 hover:text-zinc-300 transition-colors" onClick={() => onEdit(expense)} title="עריכה">
               <Pencil className="w-4 h-4" />
             </button>
-            <button className="text-rose-600 hover:text-rose-700" onClick={onDelete} title="מחיקה">
+            <button className="text-rose-400 hover:text-rose-300 transition-colors" onClick={onDelete} title="מחיקה">
               <Trash2 className="w-4 h-4" />
             </button>
           </>

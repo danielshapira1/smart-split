@@ -26,7 +26,7 @@ export function InviteButton({ groupId, isAdmin }: Props) {
   return (
     <button
       onClick={onInvite}
-      className="rounded-full bg-slate-100 px-3 py-2 text-sm"
+      className="rounded-full bg-zinc-800 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-700 border border-zinc-700 transition-colors"
       title="יצירת קישור הזמנה"
     >
       הזמן +

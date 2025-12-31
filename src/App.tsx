@@ -426,20 +426,20 @@ export default function App() {
   // === מסך ללא קבוצה: עם ברכה למעלה ===
   if (!group) {
     return (
-      <div className="h-full flex flex-col">
-        <header className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2">
+      <div className="h-full flex flex-col bg-zinc-900 min-h-screen">
+        <header className="sticky top-0 z-10 bg-zinc-800/95 backdrop-blur border-b border-zinc-700 px-4 py-3 flex items-center gap-2">
           <div className="flex-1" />
-          <div className="ms-auto me-2 text-sm text-gray-700">שלום, {greetName}</div>
-          <button onClick={signOut} className="text-sm text-red-600 flex items-center gap-1">
+          <div className="ms-auto me-2 text-sm text-zinc-300">שלום, {greetName}</div>
+          <button onClick={signOut} className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1">
             <LogOut className="w-4 h-4" /> יציאה
           </button>
         </header>
 
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4">
-          <p className="text-gray-600 text-center">
+          <p className="text-zinc-500 text-center">
             אין קבוצה עדיין — צור קבוצה חדשה או הצטרף מההזמנה.
           </p>
-          <button className="rounded-full bg-black text-white px-4 py-2" onClick={createGroup}>
+          <button className="rounded-full bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 transition-colors" onClick={createGroup}>
             צור קבוצה חדשה
           </button>
         </div>
@@ -449,9 +449,9 @@ export default function App() {
 
   /* ---------- render with group ---------- */
   return (
-    <div className="max-w-md mx-auto h-full flex flex-col">
+    <div className="max-w-md mx-auto h-full flex flex-col bg-zinc-900 min-h-screen">
       {/* header */}
-      <header className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center gap-2">
+      <header className="sticky top-0 z-10 bg-zinc-800/95 backdrop-blur border-b border-zinc-700 px-4 py-3 flex items-center gap-2">
         <GroupSwitcher
           groups={groups}
           current={group}
@@ -462,15 +462,15 @@ export default function App() {
           }}
           onCreateNew={createGroup}
         />
-        <div className="ms-auto me-2 text-sm text-gray-700">שלום, {greetName}</div>
+        <div className="ms-auto me-2 text-sm text-zinc-300">שלום, {greetName}</div>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
-        <button onClick={signOut} className="text-sm text-red-600 flex items-center gap-1">
+        <button onClick={signOut} className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1">
           <LogOut className="w-4 h-4" /> יציאה
         </button>
       </header>
 
       {/* top summary line */}
-      <div className="px-4 pt-2 text-sm text-gray-600">{summaryText}</div>
+      <div className="px-4 pt-2 text-sm text-zinc-400">{summaryText}</div>
 
       {/* search + filter */}
       <div className="px-4 pt-3 flex gap-2">
@@ -478,12 +478,12 @@ export default function App() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="חיפוש תיאור..."
-          className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black"
+          className="flex-1 rounded-xl border border-zinc-600 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-indigo-500"
         />
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="rounded-xl border px-3 py-2 text-sm outline-none"
+          className="rounded-xl border border-zinc-600 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
         >
           <option value="">כל הקטגוריות</option>
           {CATEGORIES.map((c) => (
@@ -499,8 +499,8 @@ export default function App() {
         <button
           onClick={() => setTab('expenses')}
           className={clsx(
-            'px-3 py-2 rounded-full text-sm',
-            tab === 'expenses' ? 'bg-black text-white' : 'bg-slate-100'
+            'px-3 py-2 rounded-full text-sm transition-colors',
+            tab === 'expenses' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
           )}
         >
           הוצאות
@@ -508,8 +508,8 @@ export default function App() {
         <button
           onClick={() => setTab('balances')}
           className={clsx(
-            'px-3 py-2 rounded-full text-sm',
-            tab === 'balances' ? 'bg-black text-white' : 'bg-slate-100'
+            'px-3 py-2 rounded-full text-sm transition-colors',
+            tab === 'balances' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
           )}
         >
           מאזנים
@@ -520,7 +520,7 @@ export default function App() {
       {tab === 'expenses' ? (
         <main className="flex-1 overflow-y-auto px-4 py-3">
           {filtered.length === 0 ? (
-            <p className="text-gray-500 text-center mt-10">
+            <p className="text-zinc-500 text-center mt-10">
               אין הוצאות — לחץ על הפלוס למטה כדי להוסיף.
             </p>
           ) : (
@@ -532,24 +532,24 @@ export default function App() {
                 return (
                   <li
                     key={e.id}
-                    className="bg-white rounded-2xl shadow p-3 flex items-center justify-between"
+                    className="bg-zinc-800 border border-zinc-700/50 rounded-2xl shadow-sm p-3 flex items-center justify-between"
                   >
                     <div>
-                      <div className="font-medium">{e.description || 'ללא תיאור'}</div>
-                      <div className="text-xs text-gray-500">
+                      <div className="font-medium text-zinc-200">{e.description || 'ללא תיאור'}</div>
+                      <div className="text-xs text-zinc-500">
                         קטגוריה: {e.category || '—'} ·{' '}
                         {new Date(e.occurred_on).toLocaleDateString('he-IL')} · שולם ע"י {payerName}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold">₪{(e.amount_cents / 100).toFixed(2)}</div>
-                      <div className="text-[11px] text-gray-500">{e.currency || 'ILS'}</div>
+                      <div className="font-bold text-zinc-100">₪{(e.amount_cents / 100).toFixed(2)}</div>
+                      <div className="text-[11px] text-zinc-500">{e.currency || 'ILS'}</div>
                     </div>
 
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
                       <button
                         onClick={() => setExpenseToDelete(e)}
-                        className="mr-3 text-red-400 hover:text-red-600 p-2 -ml-2"
+                        className="mr-3 text-zinc-600 hover:text-red-400 p-2 -ml-2 transition-colors"
                         title="מחק הוצאה"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -567,13 +567,13 @@ export default function App() {
 
       {/* footer add */}
       {tab === 'expenses' && (
-        <footer className="sticky bottom-0 bg-white border-t p-3">
+        <footer className="sticky bottom-0 bg-zinc-800/90 backdrop-blur border-t border-zinc-700 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-gray-600 text-sm" />
+            <div className="text-zinc-500 text-sm" />
             <button
               onClick={() => setShowForm(true)}
               className={clsx(
-                'px-4 py-2 rounded-full shadow bg-black text-white flex items-center gap-1 active:scale-[.98]'
+                'px-4 py-2 rounded-full shadow-lg shadow-indigo-900/50 bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 active:scale-[.98] transition-all'
               )}
             >
               <Plus className="w-4 h-4" /> הוסף הוצאה
@@ -598,16 +598,16 @@ export default function App() {
 
       {/* Delete Confirmation Modal */}
       {expenseToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">מחיקת הוצאה</h3>
-            <p className="text-gray-600">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-800 border border-zinc-700 w-full max-w-sm rounded-2xl p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-bold text-zinc-100">מחיקת הוצאה</h3>
+            <p className="text-zinc-400">
               אתה בטוח שאתה רוצה למחוק את ההוצאה "{expenseToDelete.description || 'ללא תיאור'}"?
             </p>
             <div className="flex gap-3 justify-end mt-4">
               <button
                 onClick={() => setExpenseToDelete(null)}
-                className="px-4 py-2 rounded-xl text-gray-600 hover:bg-gray-100 font-medium"
+                className="px-4 py-2 rounded-xl text-zinc-400 hover:bg-zinc-800 font-medium"
               >
                 ביטול
               </button>
@@ -655,17 +655,17 @@ function AuthScreen() {
   };
 
   return (
-    <div className="h-full max-w-sm mx-auto flex flex-col items-center justify-center p-4">
-      <h1 className="text-2xl font-bold mb-2">הוצאות ביחד</h1>
-      <p className="text-gray-500 mb-6 text-center">התחברות מהירה</p>
+    <div className="h-full max-w-sm mx-auto flex flex-col items-center justify-center p-4 bg-zinc-900 min-h-screen">
+      <h1 className="text-2xl font-bold mb-2 text-zinc-100">הוצאות ביחד</h1>
+      <p className="text-zinc-500 mb-6 text-center">התחברות מהירה</p>
       <div className="w-full space-y-3">
         <button
           onClick={google}
-          className="w-full rounded-xl bg-red-600 text-white py-3 font-medium active:scale-[.99]"
+          className="w-full rounded-xl bg-red-600 hover:bg-red-500 text-white py-3 font-medium active:scale-[.99] transition-colors"
         >
           התחברות עם Google
         </button>
-        <div className="text-center text-xs text-gray-500">או התחברות עם קישור למייל</div>
+        <div className="text-center text-xs text-zinc-600">או התחברות עם קישור למייל</div>
         <form onSubmit={sendMagic} className="w-full space-y-3">
           <input
             type="email"
@@ -673,15 +673,15 @@ function AuthScreen() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="המייל שלך"
-            className="w-full rounded-xl border px-3 py-3 outline-none focus:ring-2 focus:ring-black"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-600"
           />
-          <button className="w-full rounded-xl bg-black text-white py-3 font-medium active:scale-[.99]">
+          <button className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white py-3 font-medium active:scale-[.99] transition-colors">
             שלח לי קישור
           </button>
         </form>
       </div>
-      {sent && <p className="text-green-600 mt-3">נשלח קישור למייל אם הוא קיים במערכת.</p>}
-      {error && <p className="text-red-600 mt-3">{error}</p>}
+      {sent && <p className="text-green-500 mt-3">נשלח קישור למייל אם הוא קיים במערכת.</p>}
+      {error && <p className="text-red-500 mt-3">{error}</p>}
     </div>
   );
 }

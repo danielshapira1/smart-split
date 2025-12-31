@@ -211,21 +211,21 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
   return (
     <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
       {/* סיכום עליון */}
-      <section className="bg-white rounded-2xl shadow p-4">
+      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="text-sm text-gray-500">סך הוצאות קבוצה:</div>
-          <div className="font-bold">{fmtCurrency(totalSpent, currency)}</div>
+          <div className="text-sm text-zinc-500">סך הוצאות קבוצה:</div>
+          <div className="font-bold text-zinc-100">{fmtCurrency(totalSpent, currency)}</div>
 
           <div className="ml-auto flex items-center gap-6 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-gray-500">יש חובות:</span>
-              <span className="font-semibold text-rose-600">
+              <span className="text-zinc-500">יש חובות:</span>
+              <span className="font-semibold text-rose-400">
                 {fmtCurrency(totalDebt, currency)}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-gray-500">מגיע לקבל:</span>
-              <span className="font-semibold text-green-600">
+              <span className="text-zinc-500">מגיע לקבל:</span>
+              <span className="font-semibold text-emerald-400">
                 {fmtCurrency(totalCredit, currency)}
               </span>
             </div>
@@ -233,15 +233,15 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
         </div>
 
         {nonMemberPayers.length > 0 && (
-          <div className="mt-3 text-xs bg-amber-50 border border-amber-200 rounded-xl p-2 text-amber-800">
+          <div className="mt-3 text-xs bg-amber-900/20 border border-amber-900/30 rounded-xl p-2 text-amber-200">
             שים לב: קיימות הוצאות של משתמשים שאינם ברשימת חברי הקבוצה. החישוב כולל גם אותם.
           </div>
         )}
       </section>
 
       {/* מצב לכל משתתף */}
-      <section className="bg-white rounded-2xl shadow p-4">
-        <div className="text-sm font-medium mb-3">מאזנים לכל משתתף</div>
+      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-medium mb-3 text-zinc-300">מאזנים לכל משתתף</div>
         <ul className="space-y-2">
           {nets.map((n) => {
             const owes = n.net < 0;
@@ -258,23 +258,22 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
                 className="rounded-xl px-3 py-2 flex items-center justify-between"
                 style={{
                   borderInlineStart: `6px solid ${userColor(n.id)}`,
-                  backgroundColor: userBg(n.id),
+                  backgroundColor: userBg(n.id), // We'll fix alpha in lib/colors.tsx
                   boxShadow: `0 1px 0 ${userBorder(n.id)} inset`,
                 }}
               >
-                <div className="text-sm">
+                <div className="text-sm text-zinc-200">
                   <UserChip uid={n.id} name={nameOf(n.id)} />{' '}
                   {zero
                     ? 'מאוזנ/ת'
                     : owes
-                    ? `חייב/ת ל־${otherName}`
-                    : 'מגיע לקבל'}
+                      ? `חייב/ת ל־${otherName}`
+                      : 'מגיע לקבל'}
                 </div>
 
                 <div
-                  className={`text-sm font-semibold ${
-                    owes ? 'text-rose-700' : n.net > 0 ? 'text-emerald-700' : 'text-gray-500'
-                  }`}
+                  className={`text-sm font-semibold ${owes ? 'text-rose-400' : n.net > 0 ? 'text-emerald-400' : 'text-zinc-500'
+                    }`}
                 >
                   {zero ? '' : fmtCurrency(Math.abs(n.net), currency)}
                 </div>
@@ -285,10 +284,10 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
       </section>
 
       {/* הצעת סגירת חובות */}
-      <section className="bg-white rounded-2xl shadow p-4">
-        <div className="text-sm font-medium mb-3">הצעת סגירת חוב</div>
+      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
+        <div className="text-sm font-medium mb-3 text-zinc-300">הצעת סגירת חוב</div>
         {isBalanced ? (
-          <div className="text-gray-500">הקבוצה מאוזנת — אין צורך בהעברות.</div>
+          <div className="text-zinc-500">הקבוצה מאוזנת — אין צורך בהעברות.</div>
         ) : (
           <ul className="space-y-2">
             {transfers.map((t, idx) => (
@@ -296,15 +295,15 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
                 key={`${t.from}-${t.to}-${idx}`}
                 className="rounded-xl px-3 py-2 flex items-center justify-between"
                 style={{
-                  backgroundColor: userBg(t.from, 0.06),
-                  boxShadow: `0 1px 0 ${userBorder(t.from, 0.15)} inset`,
+                  backgroundColor: userBg(t.from, 0.1), // increased alpha for dark mode
+                  boxShadow: `0 1px 0 ${userBorder(t.from, 0.2)} inset`,
                 }}
               >
-                <div className="text-sm">
+                <div className="text-sm text-zinc-200">
                   <UserChip uid={t.from} name={nameOf(t.from)} /> חייב ל־{' '}
                   <UserChip uid={t.to} name={nameOf(t.to)} />
                 </div>
-                <div className="text-sm font-semibold">
+                <div className="text-sm font-semibold text-zinc-100">
                   {fmtCurrency(t.amount, currency)}
                 </div>
               </li>

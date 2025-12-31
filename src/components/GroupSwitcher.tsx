@@ -19,15 +19,15 @@ export function GroupSwitcher({ groups, current, onSelect, onCreateNew }: Props)
           const g = groups.find((x) => x.id === e.target.value)
           if (g) onSelect(g)
         }}
-        className="rounded-xl border px-3 py-2 text-sm outline-none"
+        className="rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
       >
         {groups.length === 0 ? (
-          <option value="" disabled>
+          <option value="" disabled className="bg-zinc-800 text-zinc-500">
             אין קבוצות
           </option>
         ) : null}
         {groups.map((g) => (
-          <option key={g.id} value={g.id}>
+          <option key={g.id} value={g.id} className="bg-zinc-800 text-zinc-100">
             {g.name}
           </option>
         ))}
@@ -36,7 +36,7 @@ export function GroupSwitcher({ groups, current, onSelect, onCreateNew }: Props)
       {onCreateNew && (
         <button
           onClick={onCreateNew}
-          className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700"
+          className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors border border-zinc-700"
           title="צור קבוצה חדשה"
         >
           <Plus className="w-4 h-4" />

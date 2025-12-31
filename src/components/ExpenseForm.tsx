@@ -15,7 +15,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
   const [currency, setCurrency] = useState("ILS");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState(categories[0] ?? "אחר");
-  const [date, setDate] = useState<string>(new Date().toISOString().slice(0,10));
+  const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -44,21 +44,21 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
   };
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md rounded-2xl p-4 space-y-3">
-        <h2 className="text-lg font-semibold">הוספת הוצאה</h2>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-zinc-800 border border-zinc-700 w-full max-w-md rounded-2xl p-4 space-y-3 shadow-2xl">
+        <h2 className="text-lg font-semibold text-zinc-100">הוספת הוצאה</h2>
 
         <input
           placeholder="תיאור"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded-xl border px-3 py-2"
+          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400"
         />
 
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="w-full rounded-xl border px-3 py-2"
+          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
         >
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -69,29 +69,29 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
           placeholder="סכום"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="w-full rounded-xl border px-3 py-2"
+          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400"
         />
 
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-xl border px-3 py-2"
+          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 [color-scheme:dark]"
         />
 
         <input
           value={currentPayerName}
           readOnly
-          className="w-full rounded-xl border px-3 py-2 bg-slate-50"
+          className="w-full rounded-xl border border-zinc-600/50 bg-zinc-700/30 px-3 py-2 text-zinc-400 cursor-not-allowed"
           title="נשאב מהפרופיל/מייל"
         />
 
         <div className="flex justify-between pt-2">
-          <button onClick={onClose} className="rounded-full px-4 py-2 bg-slate-100">בטל</button>
+          <button onClick={onClose} className="rounded-full px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors">בטל</button>
           <button
             disabled={saving}
             onClick={save}
-            className="rounded-full px-4 py-2 bg-black text-white"
+            className="rounded-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
           >
             {saving ? "שומר..." : "שמור הוצאה"}
           </button>

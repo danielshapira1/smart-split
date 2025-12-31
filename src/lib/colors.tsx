@@ -2,11 +2,18 @@
 import React from 'react';
 
 const PALETTE = [
-  '#2563eb', '#16a34a', '#d97706', '#db2777', '#0ea5e9',
-  '#7c3aed', '#ef4444', '#059669', '#f59e0b', '#06b6d4',
+  '#3b82f6', // blue-500
+  '#22c55e', // green-500
+  '#f59e0b', // amber-500
+  '#ec4899', // pink-500
+  '#0ea5e9', // sky-500
+  '#8b5cf6', // violet-500
+  '#ef4444', // red-500
+  '#10b981', // emerald-500
+  '#06b6d4', // cyan-500
 ] as const;
 
-const DEFAULT_COLOR = '#475569'; // slate-600
+const DEFAULT_COLOR = '#94a3b8'; // slate-400 (visible on dark)
 const colorCache = new Map<string, string>();
 
 function hashUid(uid: string) {
