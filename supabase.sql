@@ -144,9 +144,7 @@ begin
   on conflict (group_id, user_id) do update
     set role = excluded.role;
 
-  update public.invites
-     set used_by = auth.uid(),
-         used_at = now()
+  delete from public.invites
    where token = p_token;
 end;
 $$;
@@ -493,9 +491,8 @@ begin
   values (v_inv.group_id, auth.uid(), v_inv.invited_role)
   on conflict (group_id, user_id) do nothing;
 
-  update public.invites
-     set used_by = auth.uid(), used_at = now()
-   where token = p_token and used_by is null;
+  delete from public.invites
+   where token = p_token;
 
   select name into v_gname from public.groups where id = v_inv.group_id;
 
