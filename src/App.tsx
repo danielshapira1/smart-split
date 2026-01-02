@@ -9,10 +9,11 @@ import { GroupSwitcher } from './components/GroupSwitcher';
 import { InviteButton } from './components/InviteButton';
 import { ExpenseForm } from './components/ExpenseForm';
 import BalancesPanel from './components/BalancesPanel';
-import { useRealtimeExpenses } from './hooks/useRealtimeExpenses';
+import { useRealtimeExpenses, type Transfer } from './hooks/useRealtimeExpenses';
 
 import type { Group, Profile } from './lib/types';
 import type { Member } from './lib/settlements';
+import { ArrowLeftRight } from 'lucide-react';
 
 /* ---------- Types used here ---------- */
 export type Expense = {
@@ -282,7 +283,7 @@ export default function App() {
     })();
   }, [group]);
 
-  /* ----- filters (לתצוגת רשימת הוצאות בלבד) ----- */
+  /* ----- filters + combined list (לתצוגת רשימת הוצאות בלבד) ----- */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return expenses.filter((e) => {
@@ -291,6 +292,20 @@ export default function App() {
       return okCat && okSearch;
     });
   }, [expenses, search, category]);
+
+  const combinedItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    // 1. Map expenses
+    const list1 = filtered.map(e => ({ type: 'expense' as const, data: e, date: new Date(e.occurred_on || e.created_at) }));
+
+    // 2. Map transfers (Only if no category filter is active, or maybe we don't filter transfers by text yet)
+    // Transfers usually don't have categories. We'll show them unless a category is picked (or maybe 'Settlement' category?).
+    const list2 = (!category && !q) ? transfers.map(t => ({ type: 'transfer' as const, data: t, date: new Date(t.created_at) })) : [];
+
+    // 3. Merge & Sort
+    return [...list1, ...list2].sort((a, b) => b.date.getTime() - a.date.getTime());
+  }, [filtered, transfers, search, category]);
 
   /* ---------- סיכום למעלה: “מי חייב למי” ---------- */
   const meId = session?.user?.id ?? '';

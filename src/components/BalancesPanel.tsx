@@ -1,7 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { UserChip, userBg, userBorder, userColor } from '../lib/colors';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { saveTransfer } from '../lib/supaRest';
 import { ExpensesPieChart } from './ExpensesPieChart';
+import { UserMonthlyChart } from './UserMonthlyChart';
+import { SixMonthTrendChart } from './SixMonthTrendChart';
 import type { Transfer } from '../hooks/useRealtimeExpenses';
 
 /* ========= Types ========= */
@@ -122,6 +125,39 @@ export default function BalancesPanel({
 }: Props) {
   const [settling, setSettling] = useState<string | null>(null); // "from-to" key
   const [loading, setLoading] = useState(false);
+  const [targetDate, setTargetDate] = useState(new Date()); // For monthly filter
+
+  const handleNextMonth = () => {
+    setTargetDate(d => {
+      const next = new Date(d);
+      next.setMonth(next.getMonth() + 1);
+      return next;
+    });
+  };
+
+  const handlePrevMonth = () => {
+    setTargetDate(d => {
+      const prev = new Date(d);
+      prev.setMonth(prev.getMonth() - 1);
+      return prev;
+    });
+  };
+
+  // Filtered expenses for the charts
+  const monthlyExpenses = useMemo(() => {
+    const m = targetDate.getMonth();
+    const y = targetDate.getFullYear();
+    return expenses.filter(e => {
+      const d = new Date(e.occurred_on || e.created_at || '');
+      return d.getMonth() === m && d.getFullYear() === y;
+    });
+  }, [expenses, targetDate]);
+
+  // Derived members for the charts (ensure name exists)
+  const chartMembers = useMemo(() => members.map(m => ({
+    user_id: m.user_id || m.uid,
+    name: m.name || m.display_name || m.email
+  })), [members]);
 
   // 1. Participant IDs
   const participantIds = useMemo(() => {
@@ -242,9 +278,22 @@ export default function BalancesPanel({
 
   // --- Actions ---
 
-  const handleSettle = async (fromId: string, toId: string, amount: number) => {
+  const handleSettle = async (fromId: string, toId: string, maxAmount: number) => {
     if (loading) return;
-    if (!confirm(`האם לסמן את החוב ע"ס ${fmtCurrency(amount, currency)} כשולם?`)) return;
+
+    // Default to full amount, but allow edit
+    const def = (maxAmount / 100).toFixed(2);
+    const input = prompt(`הכנס סכום להחזר (מקסימום ${def})`, def);
+    if (input === null) return; // Cancelled
+
+    const val = parseFloat(input);
+    if (!Number.isFinite(val) || val <= 0) {
+      alert('סכום לא תקין');
+      return;
+    }
+
+    // Convert back to cents
+    const amountCents = Math.round(val * 100);
 
     setLoading(true);
     setSettling(`${fromId}-${toId}`);
@@ -253,7 +302,7 @@ export default function BalancesPanel({
         group_id: groupId,
         from_user: fromId,
         to_user: toId,
-        amount_cents: amount,
+        amount_cents: amountCents,
         note: 'Settle up',
       });
       onRefresh?.();
@@ -284,8 +333,27 @@ export default function BalancesPanel({
         </div>
       </section>
 
-      {/* Chart */}
-      <ExpensesPieChart expenses={expenses} currency={currency} />
+      {/* Month Nav */}
+      <div className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-2xl p-2 px-4">
+        <button onClick={handlePrevMonth} className="p-2 text-zinc-400 hover:text-white transition-colors">
+          <ChevronRight className="w-5 h-5" />
+        </button>
+        <span className="font-medium text-zinc-200">
+          {targetDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}
+        </span>
+        <button onClick={handleNextMonth} className="p-2 text-zinc-400 hover:text-white transition-colors">
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Chart: Distribution */}
+      <ExpensesPieChart expenses={monthlyExpenses} currency={currency} />
+
+      {/* Chart: User Breakdown */}
+      <UserMonthlyChart expenses={monthlyExpenses} members={chartMembers} currency={currency} />
+
+      {/* Chart: Trend */}
+      <SixMonthTrendChart expenses={expenses} currentDate={targetDate} currency={currency} />
 
       {/* Per User Status */}
       <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
