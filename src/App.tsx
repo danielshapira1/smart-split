@@ -241,7 +241,7 @@ export default function App() {
   }, [session, refreshGroups]);
 
   /* ----- realtime expenses ----- */
-  const { expenses, refresh } = useRealtimeExpenses(group?.id);
+  const { expenses, transfers, refresh } = useRealtimeExpenses(group?.id);
 
   /* ----- load members for current group (שמות להצגה) ----- */
   useEffect(() => {
@@ -562,7 +562,15 @@ export default function App() {
           )}
         </main>
       ) : (
-        <BalancesPanel members={members} expenses={expenses as any} currency="ILS" />
+        <BalancesPanel
+          members={members}
+          expenses={expenses as any}
+          transfers={transfers}
+          groupId={group.id}
+          currentUserId={session.user.id}
+          onRefresh={refresh}
+          currency="ILS"
+        />
       )}
 
       {/* footer add */}

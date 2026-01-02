@@ -1,5 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { UserChip, userBg, userBorder, userColor } from '../lib/colors';
+import { saveTransfer } from '../lib/supaRest';
+import type { Transfer } from '../hooks/useRealtimeExpenses';
 
 /* ========= Types ========= */
 
@@ -15,7 +17,7 @@ export type Expense = {
   id: string;
   group_id: string;
   user_id: string;
-  amount_cents: number | string; // לעיתים חוזר כמחרוזת – נטפל בהמרה
+  amount_cents: number | string;
   currency?: string;
   description?: string;
   category?: string;
@@ -27,12 +29,15 @@ export type Expense = {
 type Props = {
   members: Member[];
   expenses: Expense[];
+  transfers: Transfer[];  // <--- Added support for transfers
+  groupId: string;        // <--- Need groupId for saving transfers
+  currentUserId: string;  // <--- Need to know who I am
+  onRefresh?: () => void; // <--- Callback to refresh data
   currency?: string;
 };
 
 /* ========= Small helpers ========= */
 
-// המרה בטוחה לסנטים + אפס אם NaN
 const toCents = (v: unknown) => {
   const n =
     typeof v === 'string'
@@ -44,16 +49,14 @@ const toCents = (v: unknown) => {
 const clampCents = (n: unknown) => Math.max(0, toCents(n));
 
 const memberId = (m: Member | undefined | null) => (m?.uid || m?.user_id || '').trim();
-
 const safeId = (s: string | undefined | null) => (s ?? '').trim();
-
 const nameOfMember = (m: Member | undefined, fallback = ''): string =>
   (m?.name || m?.display_name || m?.email || fallback).trim();
 
 const fmtCurrency = (cents: number, currency = 'ILS') =>
   (cents / 100).toLocaleString('he-IL', { style: 'currency', currency });
 
-/** פיזור שווה של סכום בסנטים על רשימת משתמשים (כולל שאריות) */
+/** פיזור שווה של סכום בסנטים על רשימת משתמשים */
 function evenSplitCents(totalCents: number, ids: string[]) {
   const n = Math.max(1, ids.length);
   const base = Math.floor(totalCents / n);
@@ -95,8 +98,8 @@ function settleGreedy(nets: Array<{ id: string; net: number }>) {
 
     res.push({ from: d.id, to: c.id, amount });
 
-    d.net += amount; // שלילי מתקדם ל-0
-    c.net -= amount; // חיובי יורד ל-0
+    d.net += amount;
+    c.net -= amount;
 
     if (Math.abs(d.net) < 1) i++;
     if (Math.abs(c.net) < 1) j++;
@@ -107,8 +110,19 @@ function settleGreedy(nets: Array<{ id: string; net: number }>) {
 
 /* ========= Component ========= */
 
-export default function BalancesPanel({ members, expenses, currency = 'ILS' }: Props) {
-  // סט זהויות של כל המשתתפים (חברי קבוצה + כל מי ששילם הוצאה)
+export default function BalancesPanel({
+  members,
+  expenses,
+  transfers = [],
+  groupId,
+  currentUserId,
+  onRefresh,
+  currency = 'ILS'
+}: Props) {
+  const [settling, setSettling] = useState<string | null>(null); // "from-to" key
+  const [loading, setLoading] = useState(false);
+
+  // 1. Participant IDs
   const participantIds = useMemo(() => {
     const set = new Set<string>();
     for (const m of members) {
@@ -119,10 +133,15 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
       const id = safeId(e.user_id);
       if (id) set.add(id);
     }
+    // Transfers participants too
+    for (const t of transfers) {
+      if (t.from_user) set.add(t.from_user);
+      if (t.to_user) set.add(t.to_user);
+    }
     return Array.from(set).sort();
-  }, [members, expenses]);
+  }, [members, expenses, transfers]);
 
-  // כמה כל אחד שילם בפועל
+  // 2. Paid By (Expenses)
   const paidBy = useMemo(() => {
     const map = new Map<string, number>();
     for (const id of participantIds) map.set(id, 0);
@@ -134,7 +153,7 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
     return map;
   }, [participantIds, expenses]);
 
-  // כמה כל אחד היה אמור לשלם (חלוקה שווה לכל המשתתפים)
+  // 3. Owe By (Split logic - currently Even Split only)
   const oweBy = useMemo(() => {
     const map = new Map<string, number>();
     for (const id of participantIds) map.set(id, 0);
@@ -143,6 +162,7 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
     for (const e of expenses) {
       const amount = clampCents(e.amount_cents);
       if (amount <= 0) continue;
+      // TODO: Future supports unequal split here
       const share = evenSplitCents(amount, participantIds);
       for (const [id, chunk] of share.entries()) {
         map.set(id, (map.get(id) ?? 0) + chunk);
@@ -151,17 +171,37 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
     return map;
   }, [participantIds, expenses]);
 
-  // נטו לכל משתתף
-  const nets = useMemo(
-    () =>
-      participantIds.map((id) => ({
-        id,
-        net: (paidBy.get(id) ?? 0) - (oweBy.get(id) ?? 0), // >0 מגיע לו, <0 חייב
-      })),
-    [participantIds, paidBy, oweBy]
-  );
+  // 4. Transfers (Settlements)
+  // We need to count how much each person sent (reduce debt) or received (reduce credit)
+  const transferMap = useMemo(() => {
+    const sent = new Map<string, number>();
+    const received = new Map<string, number>();
+    for (const t of transfers) {
+      const amt = clampCents(t.amount_cents);
+      sent.set(t.from_user, (sent.get(t.from_user) ?? 0) + amt);
+      received.set(t.to_user, (received.get(t.to_user) ?? 0) + amt);
+    }
+    return { sent, received };
+  }, [transfers]);
 
-  // סכומים כוללים
+  // 5. Net Balances
+  const nets = useMemo(() => {
+    return participantIds.map((id) => {
+      const paidExp = paidBy.get(id) ?? 0;
+      const oweExp = oweBy.get(id) ?? 0;
+      const sentTr = transferMap.sent.get(id) ?? 0;
+      const receivedTr = transferMap.received.get(id) ?? 0;
+
+      // Net = (Paid Expenses + Sent Transfers) - (My Share of Expenses + Received Transfers)
+      // If result > 0: "I gave more than I took" -> Credit
+      // If result < 0: "I took more than I gave" -> Debt
+      const net = (paidExp + sentTr) - (oweExp + receivedTr);
+
+      return { id, net };
+    });
+  }, [participantIds, paidBy, oweBy, transferMap]);
+
+  // Totals
   const totalSpent = useMemo(
     () => expenses.reduce((s, e) => s + clampCents(e.amount_cents), 0),
     [expenses]
@@ -175,18 +215,11 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
     [nets]
   );
 
-  // הצעת סגירת חוב
-  const transfers = useMemo(() => settleGreedy(nets), [nets]);
-  const isBalanced = transfers.length === 0;
+  // Suggested settlements
+  const suggestedTransfers = useMemo(() => settleGreedy(nets), [nets]);
+  const isBalanced = suggestedTransfers.length === 0;
 
-  // למקרה שמישהו שילם ולא קיים ב־members (דיבוג)
-  const nonMemberPayers = useMemo(() => {
-    const ms = new Set(members.map(memberId).filter(Boolean));
-    const payers = new Set(expenses.map((e) => safeId(e.user_id)).filter(Boolean));
-    return Array.from(payers).filter((id) => !ms.has(id));
-  }, [members, expenses]);
-
-  // מיפוי שם ידידותי למשתמש
+  // Name resolution
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of members) {
@@ -194,7 +227,6 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
       if (!id) continue;
       map.set(id, nameOfMember(m, id.slice(0, 6)));
     }
-    // אם אין בממברים, ננסה משם משלם של הוצאות
     for (const e of expenses) {
       const id = safeId(e.user_id);
       if (!id || map.has(id)) continue;
@@ -205,52 +237,65 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
   }, [members, expenses]);
 
   const nameOf = (id: string) => nameById.get(id) ?? id.slice(0, 6);
-
   const twoMembers = participantIds.length === 2;
+
+  // --- Actions ---
+
+  const handleSettle = async (fromId: string, toId: string, amount: number) => {
+    if (loading) return;
+    if (!confirm(`האם לסמן את החוב ע"ס ${fmtCurrency(amount, currency)} כשולם?`)) return;
+
+    setLoading(true);
+    setSettling(`${fromId}-${toId}`);
+    try {
+      await saveTransfer({
+        group_id: groupId,
+        from_user: fromId,
+        to_user: toId,
+        amount_cents: amount,
+        note: 'Settle up',
+      });
+      onRefresh?.();
+    } catch (err: any) {
+      alert('שגיאה בשמירת העברה: ' + err.message);
+    } finally {
+      setLoading(false);
+      setSettling(null);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-      {/* סיכום עליון */}
+      {/* Top Summary */}
       <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="text-sm text-zinc-500">סך הוצאות קבוצה:</div>
+          <div className="text-sm text-zinc-500">סה"כ הוצאות:</div>
           <div className="font-bold text-zinc-100">{fmtCurrency(totalSpent, currency)}</div>
 
           <div className="ml-auto flex items-center gap-6 text-sm">
             <div className="flex items-center gap-2">
-              <span className="text-zinc-500">יש חובות:</span>
-              <span className="font-semibold text-rose-400">
+              <span className="text-zinc-500">חובות פתוחים:</span>
+              <span className={`font-semibold ${totalDebt > 5 ? 'text-rose-400' : 'text-zinc-400'}`}>
                 {fmtCurrency(totalDebt, currency)}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-zinc-500">מגיע לקבל:</span>
-              <span className="font-semibold text-emerald-400">
-                {fmtCurrency(totalCredit, currency)}
               </span>
             </div>
           </div>
         </div>
-
-        {nonMemberPayers.length > 0 && (
-          <div className="mt-3 text-xs bg-amber-900/20 border border-amber-900/30 rounded-xl p-2 text-amber-200">
-            שים לב: קיימות הוצאות של משתמשים שאינם ברשימת חברי הקבוצה. החישוב כולל גם אותם.
-          </div>
-        )}
       </section>
 
-      {/* מצב לכל משתתף */}
+      {/* Per User Status */}
       <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
-        <div className="text-sm font-medium mb-3 text-zinc-300">מאזנים לכל משתתף</div>
+        <div className="text-sm font-medium mb-3 text-zinc-300">מאזנים אישיים</div>
         <ul className="space-y-2">
           {nets.map((n) => {
-            const owes = n.net < 0;
-            const zero = n.net === 0;
+            const owes = n.net < -1; // tolerance
+            const credits = n.net > 1;
+            const zero = !owes && !credits;
 
             const otherName =
               twoMembers && owes
                 ? nameOf(participantIds.find((id) => id !== n.id) || '')
-                : 'הקבוצה';
+                : 'לקבוצה';
 
             return (
               <li
@@ -258,7 +303,7 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
                 className="rounded-xl px-3 py-2 flex items-center justify-between"
                 style={{
                   borderInlineStart: `6px solid ${userColor(n.id)}`,
-                  backgroundColor: userBg(n.id), // We'll fix alpha in lib/colors.tsx
+                  backgroundColor: userBg(n.id),
                   boxShadow: `0 1px 0 ${userBorder(n.id)} inset`,
                 }}
               >
@@ -267,12 +312,12 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
                   {zero
                     ? 'מאוזנ/ת'
                     : owes
-                      ? `חייב/ת ל־${otherName}`
+                      ? `חייב/ת ${otherName}`
                       : 'מגיע לקבל'}
                 </div>
 
                 <div
-                  className={`text-sm font-semibold ${owes ? 'text-rose-400' : n.net > 0 ? 'text-emerald-400' : 'text-zinc-500'
+                  className={`text-sm font-semibold ${owes ? 'text-rose-400' : credits ? 'text-emerald-400' : 'text-zinc-500'
                     }`}
                 >
                   {zero ? '' : fmtCurrency(Math.abs(n.net), currency)}
@@ -283,40 +328,55 @@ export default function BalancesPanel({ members, expenses, currency = 'ILS' }: P
         </ul>
       </section>
 
-      {/* הצעת סגירת חובות */}
+      {/* Suggested Settlements */}
       <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
-        <div className="text-sm font-medium mb-3 text-zinc-300">הצעת סגירת חוב</div>
+        <div className="text-sm font-medium mb-3 text-zinc-300">הצעת סגירת חוב (להעברה)</div>
         {isBalanced ? (
-          <div className="text-zinc-500">הקבוצה מאוזנת — אין צורך בהעברות.</div>
+          <div className="text-zinc-500 text-sm text-center py-2">הכל מאוזן! אין חובות פתוחים. ✨</div>
         ) : (
           <ul className="space-y-2">
-            {transfers.map((t, idx) => (
-              <li
-                key={`${t.from}-${t.to}-${idx}`}
-                className="rounded-xl px-3 py-2 flex items-center justify-between"
-                style={{
-                  backgroundColor: userBg(t.from, 0.1), // increased alpha for dark mode
-                  boxShadow: `0 1px 0 ${userBorder(t.from, 0.2)} inset`,
-                }}
-              >
-                <div className="text-sm text-zinc-200">
-                  <UserChip uid={t.from} name={nameOf(t.from)} /> חייב ל־{' '}
-                  <UserChip uid={t.to} name={nameOf(t.to)} />
-                </div>
-                <div className="text-sm font-semibold text-zinc-100">
-                  {fmtCurrency(t.amount, currency)}
-                </div>
-              </li>
-            ))}
+            {suggestedTransfers.map((t, idx) => {
+              const key = `${t.from}-${t.to}`;
+              const isMe = t.from === currentUserId || t.to === currentUserId; // Can I settle this?
+              // Specifically, I can only PAY if I am 'from', or received if 'to' (maybe mark as received).
+              // For simplicity, allowed if I am either party OR admin (omitted here for simplicity).
+              const canSettle = currentUserId && (t.from === currentUserId || t.to === currentUserId);
+
+              return (
+                <li
+                  key={key + idx}
+                  className="rounded-xl px-3 py-3 flex items-center justify-between bg-zinc-900/50 border border-zinc-700/50"
+                >
+                  <div className="flex flex-col gap-1">
+                    <div className="text-sm text-zinc-200 flex items-center gap-2">
+                      <UserChip uid={t.from} name={nameOf(t.from)} />
+                      <span className="text-zinc-500 text-xs">מעביר ל</span>
+                      <UserChip uid={t.to} name={nameOf(t.to)} />
+                    </div>
+                    <div className="font-bold text-zinc-100 px-1">
+                      {fmtCurrency(t.amount, currency)}
+                    </div>
+                  </div>
+
+                  {canSettle && (
+                    <button
+                      onClick={() => handleSettle(t.from, t.to, t.amount)}
+                      disabled={loading}
+                      className="text-xs bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-600/30 px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      {settling === key ? 'שומר...' : 'סמן כשולם'}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
 
-        {twoMembers && !isBalanced && transfers[0] && (
-          <div className="mt-3 text-xs text-gray-500">
-            מאחר ויש רק שני משתתפים: “{nameOf(transfers[0].from)} חייב ל־{nameOf(
-              transfers[0].to
-            )} {fmtCurrency(transfers[0].amount, currency)}”.
-          </div>
+        {!isBalanced && (
+          <p className="mt-4 text-xs text-zinc-500 text-center">
+            לחיצה על "סמן כשולם" תאפס את החוב הזה ע"י יצירת העברה.
+          </p>
         )}
       </section>
     </div>

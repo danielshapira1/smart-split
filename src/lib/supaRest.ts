@@ -111,3 +111,22 @@ export async function deleteExpense(id: string): Promise<void> {
   });
   if (!res.ok) throw new Error(await res.text());
 }
+
+/* ---------- Transfers ---------- */
+
+export type TransferInsert = {
+  group_id: string;
+  from_user: string;
+  to_user: string;
+  amount_cents: number;
+  note?: string;
+};
+
+// שמירת העברה (Settle Up)
+export async function saveTransfer(row: TransferInsert): Promise<void> {
+  const res = await rest(`/rest/v1/transfers`, {
+    method: "POST",
+    body: JSON.stringify([row]),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
