@@ -690,6 +690,19 @@ function AuthScreen() {
       </div>
       {sent && <p className="text-green-500 mt-3">נשלח קישור למייל אם הוא קיים במערכת.</p>}
       {error && <p className="text-red-500 mt-3">{error}</p>}
+
+      <div className="mt-8 border-t border-zinc-800 pt-4 w-full text-center">
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.localStorage.clear();
+            window.location.reload();
+          }}
+          className="text-xs text-zinc-600 hover:text-zinc-400 underline"
+        >
+          נתקל בבעיות התחברות? לחץ כאן לניקוי נתונים
+        </button>
+      </div>
     </div>
   );
 }
