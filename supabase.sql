@@ -184,12 +184,16 @@ create table if not exists public.transfers (
 -- ============================================================================
 -- VIEWS
 -- ============================================================================
-create or replace view public.expenses_with_names as
+create or replace view public.expenses_with_names
+with (security_invoker = true)
+as
 select e.*, coalesce(p.display_name, p.email) as payer_name
 from public.expenses e
 left join public.profiles p on p.id = e.user_id;
 
-create or replace view public.net_balances as
+create or replace view public.net_balances
+with (security_invoker = true)
+as
 with members as (
   select g.id as group_id, m.user_id
   from public.groups g
