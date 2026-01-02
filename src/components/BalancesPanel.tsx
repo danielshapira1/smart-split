@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { UserChip, userBg, userBorder, userColor } from '../lib/colors';
 import { saveTransfer } from '../lib/supaRest';
+import { ExpensesPieChart } from './ExpensesPieChart';
 import type { Transfer } from '../hooks/useRealtimeExpenses';
 
 /* ========= Types ========= */
@@ -282,6 +283,9 @@ export default function BalancesPanel({
           </div>
         </div>
       </section>
+
+      {/* Chart */}
+      <ExpensesPieChart expenses={expenses} currency={currency} />
 
       {/* Per User Status */}
       <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
