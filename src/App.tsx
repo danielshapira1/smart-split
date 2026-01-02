@@ -552,16 +552,21 @@ export default function App() {
 
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
                       <div className="flex items-center -ml-2">
-                        <button
-                          onClick={() => {
-                            setExpenseToEdit(e);
-                            setShowForm(true);
-                          }}
-                          className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
-                          title="ערוך הוצאה"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                        {/* Edit: Only the creator can edit */}
+                        {e.user_id === session.user.id && (
+                          <button
+                            onClick={() => {
+                              setExpenseToEdit(e);
+                              setShowForm(true);
+                            }}
+                            className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+                            title="ערוך הוצאה"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* Delete: Creator OR Admin/Owner can delete */}
                         <button
                           onClick={() => setExpenseToDelete(e)}
                           className="p-2 text-zinc-400 hover:text-red-400 transition-colors"
