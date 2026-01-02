@@ -359,7 +359,10 @@ export default function App() {
 
   /* ----- actions ----- */
   const signOut = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('SignOut error:', error);
+    window.localStorage.clear();
+    window.location.reload();
   };
 
   // יצירת קבוצה חדשה
