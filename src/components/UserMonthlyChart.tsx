@@ -67,7 +67,7 @@ export function UserMonthlyChart({ expenses, members, currency = 'ILS' }: Props)
                             type="category"
                             dataKey="name"
                             width={80}
-                            tick={{ fill: '#a1a1aa', fontSize: 12 }}
+                            tick={{ fill: '#f4f4f5', fontSize: 12 }}
                             axisLine={false}
                             tickLine={false}
                         />

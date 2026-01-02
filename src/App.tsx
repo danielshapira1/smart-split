@@ -327,10 +327,14 @@ export default function App() {
   const otherName = useMemo(() => {
     if (!otherId) return 'המשתתף/ת השני/ה';
     const m = members.find((x) => x.user_id === otherId);
-    if (m?.name) return m.name;
+    // If we have a real name (not same as ID), use it.
+    if (m?.name && m.name !== otherId) return m.name;
+
+    // Fallback: look for name in expenses (maybe partial update or not in members list yet)
     const exp = expenses.find((e) => e.user_id === otherId && (e.payer || e.payer_name));
     return (
       (exp?.payer?.display_name || exp?.payer?.email || exp?.payer_name) ??
+      m?.name ??
       otherId
     );
   }, [otherId, members, expenses]);
