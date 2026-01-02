@@ -95,13 +95,24 @@ export async function acceptInvite(token: string): Promise<void> {
   if (!res.ok) throw new Error(await res.text());
 }
 
-// הוספת הוצאה לטבלת expenses (שימו לב: בלי payer_name)
-export async function saveExpenseRow(exp: ExpenseInsert): Promise<void> {
-  const res = await rest(`/rest/v1/expenses`, {
-    method: "POST",
-    body: JSON.stringify([exp]),
-  });
-  if (!res.ok) throw new Error(await res.text());
+// הוספת/עדכון הוצאה expenses
+export async function saveExpenseRow(exp: ExpenseInsert & { id?: string }): Promise<void> {
+  if (exp.id) {
+    // Update
+    const { id, ...fields } = exp;
+    const res = await rest(`/rest/v1/expenses?id=eq.${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  } else {
+    // Insert
+    const res = await rest(`/rest/v1/expenses`, {
+      method: "POST",
+      body: JSON.stringify([exp]),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  }
 }
 
 // מחיקת הוצאה

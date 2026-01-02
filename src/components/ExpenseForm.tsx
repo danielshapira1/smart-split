@@ -8,14 +8,26 @@ type Props = {
   categories: string[];
   onClose: () => void;
   onSaved: () => void;
+  initialData?: {
+    id: string;
+    amount_cents: number;
+    description: string | null;
+    category: string | null;
+    occurred_on: string;
+    currency: string | null;
+  } | null;
 };
 
-export function ExpenseForm({ groupId, currentPayerName, categories, onClose, onSaved }: Props) {
-  const [amount, setAmount] = useState<string>("");
-  const [currency, setCurrency] = useState("ILS");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState(categories[0] ?? "אחר");
-  const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
+export function ExpenseForm({ groupId, currentPayerName, categories, onClose, onSaved, initialData }: Props) {
+  const [amount, setAmount] = useState<string>(
+    initialData ? (initialData.amount_cents / 100).toString() : ""
+  );
+  const [currency, setCurrency] = useState(initialData?.currency || "ILS");
+  const [description, setDescription] = useState(initialData?.description || "");
+  const [category, setCategory] = useState<string>(initialData?.category || (categories[0] ?? "אחר"));
+  const [date, setDate] = useState<string>(
+    initialData?.occurred_on || new Date().toISOString().slice(0, 10)
+  );
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -26,6 +38,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
       if (!uid) throw new Error("Not authenticated");
 
       await saveExpenseRow({
+        id: initialData?.id,
         group_id: groupId,
         user_id: uid,
         amount_cents: Math.round(Number(amount || 0) * 100),
@@ -46,7 +59,9 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-zinc-800 border border-zinc-700 w-full max-w-md rounded-2xl p-4 space-y-3 shadow-2xl">
-        <h2 className="text-lg font-semibold text-zinc-100">הוספת הוצאה</h2>
+        <h2 className="text-lg font-semibold text-zinc-100">
+          {initialData ? "עריכת הוצאה" : "הוספת הוצאה"}
+        </h2>
 
         <input
           placeholder="תיאור"
@@ -93,7 +108,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
             onClick={save}
             className="rounded-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
           >
-            {saving ? "שומר..." : "שמור הוצאה"}
+            {saving ? "שומר..." : (initialData ? "שמור שינויים" : "שמור הוצאה")}
           </button>
         </div>
       </div>

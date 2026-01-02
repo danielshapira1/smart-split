@@ -1,7 +1,7 @@
 // src/App.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { LogOut, Plus, Trash2 } from 'lucide-react';
+import { LogOut, Plus, Trash2, Pencil } from 'lucide-react';
 
 import { supabase, ensureProfileForCurrentUser } from './lib/supabaseClient';
 import { deleteExpense } from './lib/supaRest';
@@ -58,6 +58,7 @@ export default function App() {
   const [category, setCategory] = useState('');
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses');
   const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null);
 
   // חברי הקבוצה למאזנים (שמות בלבד — לא מסתמכים על זה למספר משתתפים)
   const [members, setMembers] = useState<Member[]>([]);
@@ -550,13 +551,25 @@ export default function App() {
                     </div>
 
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
-                      <button
-                        onClick={() => setExpenseToDelete(e)}
-                        className="mr-3 text-red-400 hover:text-red-300 p-2 -ml-2 transition-colors"
-                        title="מחק הוצאה"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center -ml-2">
+                        <button
+                          onClick={() => {
+                            setExpenseToEdit(e);
+                            setShowForm(true);
+                          }}
+                          className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+                          title="ערוך הוצאה"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setExpenseToDelete(e)}
+                          className="p-2 text-zinc-400 hover:text-red-400 transition-colors"
+                          title="מחק הוצאה"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </li>
                 );
@@ -599,9 +612,14 @@ export default function App() {
           groupId={group.id}
           currentPayerName={currentPayerName}
           categories={CATEGORIES}
-          onClose={() => setShowForm(false)}
+          initialData={expenseToEdit}
+          onClose={() => {
+            setShowForm(false);
+            setExpenseToEdit(null);
+          }}
           onSaved={() => {
             setShowForm(false);
+            setExpenseToEdit(null);
             refresh();
           }}
         />
