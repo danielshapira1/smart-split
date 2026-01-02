@@ -399,6 +399,7 @@ create policy "insert my transfer or admin"
 on public.transfers for insert
 with check (
   from_user = auth.uid()
+  or to_user = auth.uid()
   or exists (
     select 1 from public.memberships m
     where m.group_id = transfers.group_id
