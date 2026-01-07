@@ -27,7 +27,7 @@ export default function ExpenseItem({ expense, canEdit, onEdit, onDeleted }: Pro
     <li
       className="rounded-2xl p-3 flex items-center justify-between"
       style={{
-        borderInlineStart: `6px solid ${userColor(expense.user_id)}`,
+        borderInlineStart: `0.375rem solid ${userColor(expense.user_id)}`,
         backgroundColor: userBg(expense.user_id),
         boxShadow: `0 1px 0 ${userBorder(expense.user_id)} inset`,
       }}
@@ -43,7 +43,7 @@ export default function ExpenseItem({ expense, canEdit, onEdit, onDeleted }: Pro
       <div className="flex items-center gap-3">
         <div className="text-right">
           <div className="font-bold text-zinc-100">{formatILS(expense.amount_cents)}</div>
-          <div className="text-[11px] text-zinc-500">{expense.currency}</div>
+          <div className="text-[0.6875rem] text-zinc-500">{expense.currency}</div>
         </div>
         {canEdit && (
           <>

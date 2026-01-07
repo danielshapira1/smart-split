@@ -59,7 +59,7 @@ export function UserMonthlyChart({ expenses, members, currency = 'ILS' }: Props)
     return (
         <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4 flex flex-col">
             <h3 className="text-zinc-300 text-sm font-semibold mb-2 text-right">כמה שילם כל אחד (החודש)</h3>
-            <div className="w-full h-[200px]" dir="ltr">
+            <div className="w-full h-[12.5rem]" dir="ltr">
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data} layout="vertical" margin={{ left: 0, right: 20 }}>
                         <XAxis type="number" hide />

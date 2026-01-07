@@ -65,7 +65,7 @@ export function UserChip({
 
   const px = size === 'md' ? 'px-2' : 'px-1.5';
   const py = size === 'md' ? 'py-1' : 'py-0.5';
-  const text = size === 'md' ? 'text-[13px]' : 'text-[12px]';
+  const text = size === 'md' ? 'text-[0.8125rem]' : 'text-xs';
 
   return (
     <span

@@ -2,13 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
-body {
-    background-color: #09090b; /* zinc-950 */
-    color: #f4f4f5; /* zinc-100 */
+/* Dynamic scaling for small screens */
+html {
+  font-size: 16px;
 }
 
-* { -webkit-tap-highlight-color: transparent; }
+@media (max-width: 380px) {
+  html {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 340px) {
+  html {
+    font-size: 13px;
+  }
+}
+
+body {
+  background-color: #09090b;
+  /* zinc-950 */
+  color: #f4f4f5;
+  /* zinc-100 */
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}

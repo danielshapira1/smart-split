@@ -34,7 +34,7 @@ const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, per
     if (percent < 0.05) return null;
 
     return (
-        <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" className="text-[10px] font-bold">
+        <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" className="text-[0.625rem] font-bold">
             {`${(percent * 100).toFixed(0)}%`}
         </text>
     );
@@ -71,7 +71,7 @@ export function ExpensesPieChart({ expenses, currency = 'ILS' }: Props) {
     return (
         <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4 flex flex-col items-center">
             <h3 className="text-zinc-300 text-sm font-semibold mb-2 w-full text-right">התפלגות הוצאות</h3>
-            <div className="w-full h-[250px]" dir="ltr">
+            <div className="w-full h-[15.625rem]" dir="ltr">
                 <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                         <Pie
@@ -94,7 +94,7 @@ export function ExpensesPieChart({ expenses, currency = 'ILS' }: Props) {
                             contentStyle={{ backgroundColor: '#27272a', borderColor: '#3f3f46', borderRadius: '8px', color: '#f4f4f5' }}
                             itemStyle={{ color: '#e4e4e7' }}
                         />
-                        <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                        <Legend wrapperStyle={{ fontSize: '0.75rem', paddingTop: '0.625rem' }} />
                     </PieChart>
                 </ResponsiveContainer>
             </div>

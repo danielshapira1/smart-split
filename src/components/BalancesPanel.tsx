@@ -374,7 +374,7 @@ export default function BalancesPanel({
                 key={n.id}
                 className="rounded-xl px-3 py-2 flex items-center justify-between"
                 style={{
-                  borderInlineStart: `6px solid ${userColor(n.id)}`,
+                  borderInlineStart: `0.375rem solid ${userColor(n.id)}`,
                   backgroundColor: userBg(n.id),
                   boxShadow: `0 1px 0 ${userBorder(n.id)} inset`,
                 }}

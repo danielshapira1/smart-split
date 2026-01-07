@@ -56,7 +56,7 @@ export function SixMonthTrendChart({ expenses, currentDate = new Date(), currenc
     return (
         <div className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4 flex flex-col">
             <h3 className="text-zinc-300 text-sm font-semibold mb-2 text-right">הוצאות חצי שנה אחרונה</h3>
-            <div className="w-full h-[200px]" dir="ltr">
+            <div className="w-full h-[12.5rem]" dir="ltr">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>

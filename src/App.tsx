@@ -566,7 +566,7 @@ export default function App() {
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-zinc-100">₪{(e.amount_cents / 100).toFixed(2)}</div>
-                      <div className="text-[11px] text-zinc-500">{e.currency || 'ILS'}</div>
+                      <div className="text-[0.6875rem] text-zinc-500">{e.currency || 'ILS'}</div>
                     </div>
 
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
