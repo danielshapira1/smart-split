@@ -54,8 +54,10 @@ const clampCents = (n: unknown) => Math.max(0, toCents(n));
 
 const memberId = (m: Member | undefined | null) => (m?.uid || m?.user_id || '').trim();
 const safeId = (s: string | undefined | null) => (s ?? '').trim();
-const nameOfMember = (m: Member | undefined, fallback = ''): string =>
-  (m?.name || m?.display_name || m?.email || fallback).trim();
+const nameOfMember = (m: Member | undefined, fallback = ''): string => {
+  const n = m?.name || m?.display_name || m?.email || fallback;
+  return n?.trim() || 'Unknown';
+};
 
 const fmtCurrency = (cents: number, currency = 'ILS') =>
   (cents / 100).toLocaleString('he-IL', { style: 'currency', currency });

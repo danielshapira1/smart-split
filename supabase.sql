@@ -3,26 +3,30 @@
 -- CLEAN SLATE VERSION: DROPS EVERYTHING FIRST!
 -- ============================================================================
 
--- 1. DROP EXISTING VIEWS
-drop view if exists public.net_balances cascade;
-drop view if exists public.expenses_with_names cascade;
+-- ============================================================================
+-- SAFEGUARDED: Destructive DROP commands are commented out to prevent accidents.
+-- ============================================================================
 
--- 2. DROP EXISTING TABLES (Reverse dependency order to avoid FK errors)
-drop table if exists public.transfers cascade;
-drop table if exists public.expenses cascade;
-drop table if exists public.invites cascade;
-drop table if exists public.memberships cascade;
-drop table if exists public.groups cascade;
--- We can drop profiles, but remember this deletes user profile data!
-drop table if exists public.profiles cascade;
+-- -- 1. DROP EXISTING VIEWS
+-- drop view if exists public.net_balances cascade;
+-- drop view if exists public.expenses_with_names cascade;
 
--- 3. DROP FUNCTIONS & TRIGGERS
-drop trigger if exists on_auth_user_created on auth.users cascade;
-drop function if exists public.handle_new_user() cascade;
-drop function if exists public.create_group(text) cascade;
-drop function if exists public.create_invite(uuid, text) cascade;
-drop function if exists public.accept_invite(uuid) cascade;
-drop function if exists public.join_group_token(uuid) cascade;
+-- -- 2. DROP EXISTING TABLES (Reverse dependency order to avoid FK errors)
+-- drop table if exists public.transfers cascade;
+-- drop table if exists public.expenses cascade;
+-- drop table if exists public.invites cascade;
+-- drop table if exists public.memberships cascade;
+-- drop table if exists public.groups cascade;
+-- -- We can drop profiles, but remember this deletes user profile data!
+-- drop table if exists public.profiles cascade;
+
+-- -- 3. DROP FUNCTIONS & TRIGGERS
+-- drop trigger if exists on_auth_user_created on auth.users cascade;
+-- drop function if exists public.handle_new_user() cascade;
+-- drop function if exists public.create_group(text) cascade;
+-- drop function if exists public.create_invite(uuid, text) cascade;
+-- drop function if exists public.accept_invite(uuid) cascade;
+-- drop function if exists public.join_group_token(uuid) cascade;
 
 -- ============================================================================
 -- RE-CREATE EVERYTHING
@@ -57,6 +61,8 @@ begin
 end;
 $$;
 
+-- Drop trigger if exists to allow re-creation
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user();
@@ -250,7 +256,7 @@ alter table public.transfers    enable row level security;
 drop policy if exists "read own profile"   on public.profiles;
 create policy "read own profile"
 on public.profiles for select
-using (auth.uid() = id);
+using (true);
 
 drop policy if exists "update own profile" on public.profiles;
 create policy "update own profile"
@@ -511,4 +517,84 @@ exception when others then
   return jsonb_build_object('joined', false, 'reason', sqlerrm);
 end $$;
 
-grant execute on function public.join_group_token(uuid) to anon, authenticated;
+
+-- ============================================================================
+-- BACKUP SYSTEM
+-- ============================================================================
+
+-- 1. Enable pg_cron (requires superuser or specific Supabase setup)
+create extension if not exists pg_cron with schema public;
+
+-- 2. Create Backups Table
+create table if not exists public.daily_backups (
+  id               uuid primary key default gen_random_uuid(),
+  backup_timestamp timestamptz default now(),
+  table_name       text not null,
+  table_data       jsonb not null
+);
+
+-- RLS: Only admins/service role should access backups
+alter table public.daily_backups enable row level security;
+
+-- Drop policy if it exists to allow re-running this script without error
+drop policy if exists "admin_only_backups" on public.daily_backups;
+
+create policy "admin_only_backups"
+  on public.daily_backups
+  to service_role
+  using (true)
+  with check (true);
+
+-- 3. Snapshot Function
+create or replace function public.capture_daily_snapshot()
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  t text;
+begin
+  -- List of tables to backup
+  foreach t in array array['profiles', 'groups', 'memberships', 'expenses', 'transfers', 'invites']
+  loop
+    insert into public.daily_backups (table_name, table_data)
+    select t, jsonb_agg(tbl)
+    from (select * from public.profiles) as tbl  -- dynamic SQL needed for generic loop?
+    -- Simplified: doing explicit inserts for safety and clarity in PL/pgSQL without complex dynamic query execs if not needed.
+    -- Actually, dynamic SQL is better here to avoid "table not found" in strict static analysis if types change, but let's do simple dynamic.
+    where false; -- dummy, see below
+  end loop;
+
+  -- Real implementation with individual inserts safely
+  insert into public.daily_backups (table_name, table_data)
+  select 'profiles', coalesce(jsonb_agg(t), '[]'::jsonb) from public.profiles t;
+
+  insert into public.daily_backups (table_name, table_data)
+  select 'groups', coalesce(jsonb_agg(t), '[]'::jsonb) from public.groups t;
+
+  insert into public.daily_backups (table_name, table_data)
+  select 'memberships', coalesce(jsonb_agg(t), '[]'::jsonb) from public.memberships t;
+
+  insert into public.daily_backups (table_name, table_data)
+  select 'expenses', coalesce(jsonb_agg(t), '[]'::jsonb) from public.expenses t;
+
+  insert into public.daily_backups (table_name, table_data)
+  select 'transfers', coalesce(jsonb_agg(t), '[]'::jsonb) from public.transfers t;
+  
+  insert into public.daily_backups (table_name, table_data)
+  select 'invites', coalesce(jsonb_agg(t), '[]'::jsonb) from public.invites t;
+
+  -- Auto-cleanup: keep only last 30 days
+  delete from public.daily_backups
+  where backup_timestamp < now() - interval '30 days';
+end;
+$$;
+
+-- 4. Schedule Job (At 03:00 AM every day)
+-- Safely remove existing job if it exists to avoid duplicates or errors
+SELECT cron.unschedule(jobid)
+FROM cron.job
+WHERE jobname = 'daily-backup';
+
+-- Schedule the new job
+select cron.schedule('daily-backup', '0 3 * * *', 'select public.capture_daily_snapshot()');

@@ -130,7 +130,8 @@ export default function App() {
 
           if (error) throw error;
           gs = (data ?? []) as any as Group[];
-        } catch {
+        } catch (err2) {
+          console.error('refreshGroups fallback failed:', err2);
           gs = [];
         }
       }
@@ -335,7 +336,7 @@ export default function App() {
     return (
       (exp?.payer?.display_name || exp?.payer?.email || exp?.payer_name) ??
       m?.name ??
-      otherId
+      'חבר קבוצה'
     );
   }, [otherId, members, expenses]);
 
@@ -550,7 +551,7 @@ export default function App() {
             <ul className="space-y-3">
               {filtered.map((e) => {
                 const payerName =
-                  e.payer?.display_name || e.payer?.email || e.payer_name || e.user_id;
+                  e.payer?.display_name || e.payer?.email || e.payer_name || '...';
 
                 return (
                   <li
