@@ -6,6 +6,10 @@ html,
 body,
 #root {
   height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #18181b;
+  /* tailwind zinc-900 */
 }
 
 /* Dynamic scaling for small screens */
