@@ -1,20 +1,57 @@
-import React, { useRef, useState } from 'react';
-import { Download, Upload, X, AlertTriangle, Check, Loader2 } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Download, Upload, X, AlertTriangle, Check, Loader2, User, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import type { Group, Expense } from '../lib/types';
-import type { Transfer } from '../hooks/useRealtimeExpenses';
+import type { Group, Profile } from '../lib/types';
 
 type Props = {
     group: Group;
+    profile: Profile | null;
     onClose: () => void;
     onRefresh: () => void;
+    onLogout: () => void;
 };
 
-export function GroupSettings({ group, onClose, onRefresh }: Props) {
+export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: Props) {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [replaceMode, setReplaceMode] = useState(false);
+
+    // Profile State
+    const [displayName, setDisplayName] = useState(profile?.display_name || '');
+    const [savingProfile, setSavingProfile] = useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (profile) setDisplayName(profile.display_name || '');
+    }, [profile]);
+
+    // --- PROFILE SAVE ---
+    const handleSaveProfile = async () => {
+        if (!profile) return;
+        try {
+            setSavingProfile(true);
+            const { error } = await supabase
+                .from('profiles')
+                .update({ display_name: displayName })
+                .eq('id', profile.id);
+
+            if (error) throw error;
+
+            setMessage({ type: 'success', text: 'הפרופיל עודכן בהצלחה!' });
+            // Refresh main app potentially? The parent should ideally listen to changes or we rely on re-fetch
+            onRefresh(); // Using onRefresh trigger to maybe reload context if needed, though App.tsx usually re-fetches profile on its own schedule.
+            // Actually App.tsx fetches profile once. We might need a way to tell App to refresh profile. 
+            // For now, let's rely on the fact that App might not auto-update immediately unless we force it, 
+            // but user sees "Success" here.
+
+        } catch (err: any) {
+            console.error('Profile update failed:', err);
+            setMessage({ type: 'error', text: 'שגיאה בעדכון הפרופיל: ' + err.message });
+        } finally {
+            setSavingProfile(false);
+        }
+    };
 
     // --- EXPORT ---
     const handleExport = async () => {
@@ -179,7 +216,7 @@ export function GroupSettings({ group, onClose, onRefresh }: Props) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-zinc-800 border border-zinc-700 w-full max-w-sm rounded-2xl p-6 shadow-xl flex flex-col gap-4 relative">
+            <div className="bg-zinc-800 border border-zinc-700 w-full max-w-sm rounded-2xl p-6 shadow-xl flex flex-col gap-4 relative max-h-[85vh] overflow-y-auto">
                 <button
                     onClick={onClose}
                     className="absolute top-4 left-4 p-2 text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -187,12 +224,36 @@ export function GroupSettings({ group, onClose, onRefresh }: Props) {
                     <X className="w-5 h-5" />
                 </button>
 
-                <h2 className="text-xl font-bold text-zinc-100">הגדרות קבוצה</h2>
-                <p className="text-sm text-zinc-400 -mt-2">
-                    {group.name}
-                </p>
+                <h2 className="text-xl font-bold text-zinc-100">הגדרות</h2>
 
-                <div className="space-y-4 pt-2">
+                {/* Profile Section */}
+                <div className="space-y-3 pt-2">
+                    <h3 className="font-medium text-zinc-200 flex items-center gap-2 text-sm">
+                        <User className="w-4 h-4 text-indigo-400" /> פרופיל משתמש
+                    </h3>
+                    <div className="space-y-2">
+                        <div>
+                            <label className="text-xs text-zinc-500 block mb-1">שם לתצוגה</label>
+                            <input
+                                value={displayName}
+                                onChange={e => setDisplayName(e.target.value)}
+                                className="w-full rounded-lg bg-zinc-900/50 border border-zinc-700/50 px-3 py-2 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-zinc-500"
+                                placeholder="השם שלך בקבוצה"
+                            />
+                        </div>
+                        <button
+                            onClick={handleSaveProfile}
+                            disabled={savingProfile}
+                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition-colors w-min whitespace-nowrap"
+                        >
+                            {savingProfile ? 'שומר...' : 'שמור שינויים'}
+                        </button>
+                    </div>
+                </div>
+
+                <hr className="border-zinc-700/50 my-1" />
+
+                <div className="space-y-4">
                     {/* Export */}
                     <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-700/50">
                         <h3 className="font-medium text-zinc-200 mb-1 flex items-center gap-2">
@@ -255,6 +316,15 @@ export function GroupSettings({ group, onClose, onRefresh }: Props) {
                         <span>{message.text}</span>
                     </div>
                 )}
+
+                <div className="mt-2 border-t border-zinc-700/50 pt-4">
+                    <button
+                        onClick={onLogout}
+                        className="w-full py-3 rounded-xl border border-red-900/30 bg-red-900/10 hover:bg-red-900/20 text-red-400 hover:text-red-300 transition-colors flex items-center justify-center gap-2 font-medium"
+                    >
+                        <LogOut className="w-4 h-4" /> התנתק
+                    </button>
+                </div>
             </div>
         </div>
     );

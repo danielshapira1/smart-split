@@ -148,20 +148,23 @@ export default function App() {
   );
 
   /* ----- profile + groups ----- */
+  const fetchProfile = React.useCallback(async () => {
+    if (!session) return;
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', session.user.id)
+      .maybeSingle<Profile>();
+    setProfile(prof ?? null);
+  }, [session]);
+
   useEffect(() => {
     if (!session) return;
     (async () => {
       await refreshGroups(null);
-
-      // פרופיל
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle<Profile>();
-      setProfile(prof ?? null);
+      await fetchProfile();
     })();
-  }, [session, refreshGroups]);
+  }, [session, refreshGroups, fetchProfile]);
 
   /* ----- Realtime על memberships של המשתמש ----- */
   useEffect(() => {
@@ -497,9 +500,6 @@ export default function App() {
           <Settings className="w-5 h-5" />
         </button>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
-        <button onClick={signOut} className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1">
-          <LogOut className="w-4 h-4" /> יציאה
-        </button>
       </header>
 
       {/* top summary line */}
@@ -662,10 +662,13 @@ export default function App() {
       {showSettings && group && (
         <GroupSettings
           group={group}
+          profile={profile}
           onClose={() => setShowSettings(false)}
           onRefresh={() => {
             refresh(); // Triggers re-fetch of realtime expenses
+            fetchProfile(); // Re-fetch profile to update header name
           }}
+          onLogout={signOut}
         />
       )}
 
