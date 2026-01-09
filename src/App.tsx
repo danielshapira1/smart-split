@@ -1,11 +1,12 @@
 // src/App.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { LogOut, Plus, Trash2, Pencil } from 'lucide-react';
+import { LogOut, Plus, Trash2, Pencil, Settings } from 'lucide-react';
 
 import { supabase, ensureProfileForCurrentUser } from './lib/supabaseClient';
 import { deleteExpense } from './lib/supaRest';
 import { GroupSwitcher } from './components/GroupSwitcher';
+import { GroupSettings } from './components/GroupSettings';
 import { InviteButton } from './components/InviteButton';
 import { ExpenseForm } from './components/ExpenseForm';
 import BalancesPanel from './components/BalancesPanel';
@@ -55,6 +56,7 @@ export default function App() {
   const [role, setRole] = useState<string>('member');
 
   const [showForm, setShowForm] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [tab, setTab] = useState<'expenses' | 'balances'>('expenses');
@@ -487,6 +489,13 @@ export default function App() {
           onCreateNew={createGroup}
         />
         <div className="ms-auto me-2 text-sm text-zinc-300">שלום, {greetName}</div>
+        <button
+          onClick={() => setShowSettings(true)}
+          className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+          title="הגדרות קבוצה"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
         <InviteButton groupId={group.id} isAdmin={role === 'owner' || role === 'admin'} />
         <button onClick={signOut} className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1">
           <LogOut className="w-4 h-4" /> יציאה
@@ -646,6 +655,16 @@ export default function App() {
             setShowForm(false);
             setExpenseToEdit(null);
             refresh();
+          }}
+        />
+      )}
+
+      {showSettings && group && (
+        <GroupSettings
+          group={group}
+          onClose={() => setShowSettings(false)}
+          onRefresh={() => {
+            refresh(); // Triggers re-fetch of realtime expenses
           }}
         />
       )}
