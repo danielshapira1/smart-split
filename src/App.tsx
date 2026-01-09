@@ -480,7 +480,7 @@ export default function App() {
   return (
     <div className="max-w-md mx-auto h-full flex flex-col bg-zinc-900 min-h-screen">
       {/* header */}
-      <header className="sticky top-0 z-10 bg-zinc-800/95 backdrop-blur border-b border-zinc-700 px-4 py-3 flex items-center gap-2">
+      <header className="sticky top-0 z-10 bg-zinc-900/60 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center gap-2">
         <GroupSwitcher
           groups={groups}
           current={group}
@@ -503,24 +503,24 @@ export default function App() {
       </header>
 
       {/* top summary line */}
-      <div className="px-4 pt-2 text-sm text-zinc-400">{summaryText}</div>
+      <div className="px-4 pt-4 pb-2 text-sm text-zinc-400 font-medium">{summaryText}</div>
 
       {/* search + filter */}
-      <div className="px-4 pt-3 flex gap-2">
+      <div className="px-4 py-2 flex gap-2">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="חיפוש תיאור..."
-          className="flex-1 rounded-xl border border-zinc-600 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 rounded-xl border border-white/10 bg-zinc-800/40 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:ring-2 focus:ring-indigo-500/50 backdrop-blur-sm transition-all"
         />
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="rounded-xl border border-zinc-600 bg-zinc-800/50 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
+          className="rounded-xl border border-white/10 bg-zinc-800/40 px-3 py-2 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 backdrop-blur-sm"
         >
-          <option value="">כל הקטגוריות</option>
+          <option value="" className="bg-zinc-800">כל הקטגוריות</option>
           {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
+            <option key={c} value={c} className="bg-zinc-800">
               {c}
             </option>
           ))}
@@ -528,25 +528,31 @@ export default function App() {
       </div>
 
       {/* tabs */}
-      <nav className="px-4 pt-2 flex gap-2">
-        <button
-          onClick={() => setTab('expenses')}
-          className={clsx(
-            'px-3 py-2 rounded-full text-sm transition-colors',
-            tab === 'expenses' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-          )}
-        >
-          הוצאות
-        </button>
-        <button
-          onClick={() => setTab('balances')}
-          className={clsx(
-            'px-3 py-2 rounded-full text-sm transition-colors',
-            tab === 'balances' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-          )}
-        >
-          מאזנים
-        </button>
+      <nav className="px-4 py-3">
+        <div className="bg-zinc-800/50 p-1 rounded-2xl flex gap-1 border border-white/5 backdrop-blur-sm">
+          <button
+            onClick={() => setTab('expenses')}
+            className={clsx(
+              'flex-1 py-2 rounded-xl text-sm font-medium transition-all duration-200',
+              tab === 'expenses'
+                ? 'bg-zinc-700/80 text-white shadow-sm ring-1 ring-white/10'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/30'
+            )}
+          >
+            הוצאות
+          </button>
+          <button
+            onClick={() => setTab('balances')}
+            className={clsx(
+              'flex-1 py-2 rounded-xl text-sm font-medium transition-all duration-200',
+              tab === 'balances'
+                ? 'bg-zinc-700/80 text-white shadow-sm ring-1 ring-white/10'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/30'
+            )}
+          >
+            מאזנים
+          </button>
+        </div>
       </nav>
 
       {/* content */}
@@ -565,22 +571,25 @@ export default function App() {
                 return (
                   <li
                     key={e.id}
-                    className="bg-zinc-800 border border-zinc-700/50 rounded-2xl shadow-sm p-3 flex items-center justify-between"
+                    className="group bg-zinc-800/40 backdrop-blur-sm border border-white/5 rounded-2xl p-4 flex items-center justify-between hover:bg-zinc-800/60 transition-all duration-200"
                   >
                     <div>
-                      <div className="font-medium text-zinc-200">{e.description || 'ללא תיאור'}</div>
-                      <div className="text-xs text-zinc-500">
-                        קטגוריה: {e.category || '—'} ·{' '}
-                        {new Date(e.occurred_on).toLocaleDateString('he-IL')} · שולם ע"י {payerName}
+                      <div className="font-medium text-zinc-200 text-base">{e.description || 'ללא תיאור'}</div>
+                      <div className="text-xs text-zinc-500 mt-1 flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-zinc-700/50 border border-white/5">{e.category || '—'}</span>
+                        <span>•</span>
+                        <span>{new Date(e.occurred_on).toLocaleDateString('he-IL')}</span>
+                        <span>•</span>
+                        <span>{payerName}</span>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-bold text-zinc-100">₪{(e.amount_cents / 100).toFixed(2)}</div>
-                      <div className="text-[0.6875rem] text-zinc-500">{e.currency || 'ILS'}</div>
+                      <div className="font-bold text-zinc-100 text-lg">₪{(e.amount_cents / 100).toFixed(2)}</div>
+                      <div className="text-[0.65rem] text-zinc-500 uppercase tracking-wider">{e.currency || 'ILS'}</div>
                     </div>
 
                     {(e.user_id === session.user.id || role === 'owner' || role === 'admin') && (
-                      <div className="flex items-center -ml-2">
+                      <div className="flex items-center gap-1 mr-4 opacity-0 group-hover:opacity-100 transition-opacity">
                         {/* Edit: Only the creator can edit */}
                         {e.user_id === session.user.id && (
                           <button
@@ -588,7 +597,7 @@ export default function App() {
                               setExpenseToEdit(e);
                               setShowForm(true);
                             }}
-                            className="p-2 text-zinc-400 hover:text-indigo-400 transition-colors"
+                            className="p-2 text-zinc-400 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-colors"
                             title="ערוך הוצאה"
                           >
                             <Pencil className="w-4 h-4" />
@@ -598,7 +607,7 @@ export default function App() {
                         {/* Delete: Creator OR Admin/Owner can delete */}
                         <button
                           onClick={() => setExpenseToDelete(e)}
-                          className="p-2 text-zinc-400 hover:text-red-400 transition-colors"
+                          className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
                           title="מחק הוצאה"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -625,18 +634,16 @@ export default function App() {
 
       {/* footer add */}
       {tab === 'expenses' && (
-        <footer className="sticky bottom-0 bg-zinc-800/90 backdrop-blur border-t border-zinc-700 p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-zinc-500 text-sm" />
-            <button
-              onClick={() => setShowForm(true)}
-              className={clsx(
-                'px-4 py-2 rounded-full shadow-lg shadow-indigo-900/50 bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 active:scale-[.98] transition-all'
-              )}
-            >
-              <Plus className="w-4 h-4" /> הוסף הוצאה
-            </button>
-          </div>
+        <footer className="sticky bottom-0 pointer-events-none p-6 flex justify-end">
+          <button
+            onClick={() => setShowForm(true)}
+            className={clsx(
+              'pointer-events-auto px-5 py-3 rounded-2xl shadow-xl shadow-indigo-500/20 bg-gradient-to-r from-indigo-600 to-violet-600 text-white flex items-center gap-2 active:scale-[.98] hover:scale-105 transition-all duration-200 font-medium'
+            )}
+          >
+            <Plus className="w-5 h-5" />
+            <span>הוסף הוצאה</span>
+          </button>
         </footer>
       )}
 

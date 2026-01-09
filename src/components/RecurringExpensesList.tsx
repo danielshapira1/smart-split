@@ -73,7 +73,7 @@ export function RecurringExpensesList({ group }: Props) {
     return (
         <div className="space-y-3">
             {expenses.map(ex => (
-                <div key={ex.id} className="bg-zinc-800/50 p-3 rounded-xl border border-zinc-700/50 flex justify-between items-center group">
+                <div key={ex.id} className="bg-zinc-800/40 backdrop-blur-sm p-3 rounded-xl border border-white/5 flex justify-between items-center group hover:bg-zinc-800/60 transition-colors">
                     <div>
                         <div className="font-medium text-zinc-200">{ex.description || 'ללא תיאור'}</div>
                         <div className="text-xs text-zinc-500 flex items-center gap-2 mt-1">
@@ -88,13 +88,13 @@ export function RecurringExpensesList({ group }: Props) {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
-                        <div className="text-indigo-400 font-medium whitespace-nowrap" dir="ltr">
-                            {(ex.amount_cents / 100).toFixed(2)} {ex.currency}
+                        <div className="text-zinc-100 font-bold whitespace-nowrap" dir="ltr">
+                            {ex.currency} {(ex.amount_cents / 100).toFixed(2)}
                         </div>
                         <button
                             onClick={() => handleDelete(ex.id)}
                             disabled={deletingId === ex.id}
-                            className="p-2 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-red-900/20"
+                            className="p-2 text-zinc-500 hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
                             title="מחק הוראת קבע"
                         >
                             {deletingId === ex.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}

@@ -319,9 +319,9 @@ export default function BalancesPanel({
   return (
     <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
       {/* Top Summary */}
-      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
+      <section className="bg-zinc-800/40 backdrop-blur-sm border border-white/5 rounded-2xl p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-4">
-          <div className="text-sm text-zinc-500">סה"כ הוצאות:</div>
+          <div className="text-sm text-zinc-400">סה"כ הוצאות:</div>
           <div className="font-bold text-zinc-100">{fmtCurrency(totalSpent, currency)}</div>
 
           <div className="ml-auto flex items-center gap-6 text-sm">
@@ -336,7 +336,7 @@ export default function BalancesPanel({
       </section>
 
       {/* Month Nav */}
-      <div className="flex items-center justify-between bg-zinc-800 border border-zinc-700 rounded-2xl p-2 px-4">
+      <div className="flex items-center justify-between bg-zinc-800/40 backdrop-blur-sm border border-white/5 rounded-2xl p-2 px-4 shadow-sm">
         <button onClick={handlePrevMonth} className="p-2 text-zinc-400 hover:text-white transition-colors">
           <ChevronRight className="w-5 h-5" />
         </button>
@@ -358,7 +358,7 @@ export default function BalancesPanel({
       <SixMonthTrendChart expenses={expenses} currentDate={targetDate} currency={currency} />
 
       {/* Per User Status */}
-      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
+      <section className="bg-zinc-800/40 backdrop-blur-sm border border-white/5 rounded-2xl shadow-sm p-4">
         <div className="text-sm font-medium mb-3 text-zinc-300">מאזנים אישיים</div>
         <ul className="space-y-2">
           {nets.map((n) => {
@@ -377,7 +377,7 @@ export default function BalancesPanel({
                 className="rounded-xl px-3 py-2 flex items-center justify-between"
                 style={{
                   borderInlineStart: `0.375rem solid ${userColor(n.id)}`,
-                  backgroundColor: userBg(n.id),
+                  backgroundColor: 'rgba(39, 39, 42, 0.4)', // zinc-800/40 equivalent
                   boxShadow: `0 1px 0 ${userBorder(n.id)} inset`,
                 }}
               >
@@ -403,7 +403,7 @@ export default function BalancesPanel({
       </section>
 
       {/* Suggested Settlements */}
-      <section className="bg-zinc-800 border border-zinc-700 rounded-2xl shadow-sm p-4">
+      <section className="bg-zinc-800/40 backdrop-blur-sm border border-white/5 rounded-2xl shadow-sm p-4">
         <div className="text-sm font-medium mb-3 text-zinc-300">הצעת סגירת חוב (להעברה)</div>
         {isBalanced ? (
           <div className="text-zinc-500 text-sm text-center py-2">הכל מאוזן! אין חובות פתוחים. ✨</div>
@@ -419,7 +419,7 @@ export default function BalancesPanel({
               return (
                 <li
                   key={key + idx}
-                  className="rounded-xl px-3 py-3 flex items-center justify-between bg-zinc-900/50 border border-zinc-700/50"
+                  className="rounded-xl px-3 py-3 flex items-center justify-between bg-zinc-900/50 border border-white/5"
                 >
                   <div className="flex flex-col gap-1">
                     <div className="text-sm text-zinc-200 flex items-center gap-2">

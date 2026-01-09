@@ -40,8 +40,9 @@ html {
 }
 
 body {
-  background-color: #09090b;
-  /* zinc-950 */
+  background: linear-gradient(to bottom, #09090b, #18181b);
+  /* zinc-950 to zinc-900 */
+  min-height: 100vh;
   color: #f4f4f5;
   /* zinc-100 */
 }

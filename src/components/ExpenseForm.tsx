@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { saveExpenseRow } from "../lib/supaRest";
+import { DatePicker } from "./DatePicker";
 
 type Props = {
   groupId: string;
@@ -78,83 +79,79 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-zinc-800 border border-zinc-700 w-full max-w-md rounded-2xl p-4 space-y-3 shadow-2xl">
-        <h2 className="text-lg font-semibold text-zinc-100">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div className="bg-zinc-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl">
+        <h2 className="text-xl font-bold text-zinc-100">
           {initialData ? "עריכת הוצאה" : "הוספת הוצאה"}
         </h2>
 
-        <input
-          placeholder="תיאור"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400"
-        />
+        <div className="space-y-3">
+          <input
+            placeholder="תיאור ההוצאה"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full rounded-xl border border-white/5 bg-zinc-800/50 px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder-zinc-500"
+          />
 
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          {categories.map((c) => <option key={c} value={c} className="bg-zinc-800 text-zinc-100">{c}</option>)}
-        </select>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full rounded-xl border border-white/5 bg-zinc-800/50 px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all appearance-none"
+          >
+            {categories.map((c) => <option key={c} value={c} className="bg-zinc-800 text-zinc-100">{c}</option>)}
+          </select>
 
-        <div className="flex items-center gap-3 bg-zinc-700/30 p-2 rounded-xl border border-zinc-700/50">
-          <label className="relative inline-flex items-center cursor-pointer">
+          <div className="flex items-center gap-3 bg-zinc-800/30 p-3 rounded-xl border border-white/5">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isRecurring}
+                onChange={e => setIsRecurring(e.target.checked)}
+                className="sr-only peer"
+                disabled={!!initialData} // Cannot change existing expense to recurring here easily
+              />
+              <div className="w-11 h-6 bg-zinc-700/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+            </label>
+            <span className="text-sm text-zinc-300 font-medium">תשלום קבוע (הוראת קבע)</span>
+          </div>
+
+          {isRecurring && (
+            <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+              <select
+                value={frequency}
+                onChange={(e) => setFrequency(e.target.value)}
+                className="w-full rounded-xl border border-white/5 bg-zinc-800/50 px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+              >
+                <option value="monthly" className="bg-zinc-800 text-zinc-100">כל חודש</option>
+                <option value="weekly" className="bg-zinc-800 text-zinc-100">כל שבוע</option>
+              </select>
+            </div>
+          )}
+
+          <div className="flex gap-3">
             <input
-              type="checkbox"
-              checked={isRecurring}
-              onChange={e => setIsRecurring(e.target.checked)}
-              className="sr-only peer"
-              disabled={!!initialData} // Cannot change existing expense to recurring here easily
+              type="number"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="flex-1 rounded-xl border border-white/5 bg-zinc-800/50 px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder-zinc-500 font-mono text-lg"
             />
-            <div className="w-11 h-6 bg-zinc-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-          </label>
-          <span className="text-sm text-zinc-300">תשלום קבוע (הוראת קבע)</span>
+            <div className="w-40">
+              <DatePicker
+                value={date}
+                onChange={setDate}
+              />
+            </div>
+          </div>
         </div>
 
-        {isRecurring && (
-          <div className="animate-in fade-in slide-in-from-top-1 duration-200">
-            <select
-              value={frequency}
-              onChange={(e) => setFrequency(e.target.value)}
-              className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="monthly" className="bg-zinc-800 text-zinc-100">כל חודש</option>
-              <option value="weekly" className="bg-zinc-800 text-zinc-100">כל שבוע</option>
-            </select>
-          </div>
-        )}
-
-        <input
-          type="number"
-          inputMode="decimal"
-          placeholder="סכום"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 placeholder-zinc-400"
-        />
-
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="w-full rounded-xl border border-zinc-600 bg-zinc-700/50 px-3 py-2 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 [color-scheme:dark]"
-        />
-
-        <input
-          value={currentPayerName}
-          readOnly
-          className="w-full rounded-xl border border-zinc-600/50 bg-zinc-700/30 px-3 py-2 text-zinc-400 cursor-not-allowed"
-          title="נשאב מהפרופיל/מייל"
-        />
-
-        <div className="flex justify-between pt-2">
-          <button onClick={onClose} className="rounded-full px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors">בטל</button>
+        <div className="pt-4 flex justify-end gap-3">
+          <button onClick={onClose} className="rounded-xl px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors font-medium">ביטול</button>
           <button
             disabled={saving}
             onClick={save}
-            className="rounded-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50"
+            className="rounded-xl px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 font-medium shadow-lg shadow-indigo-500/20"
           >
             {saving ? "שומר..." : (initialData ? "שמור שינויים" : "שמור הוצאה")}
           </button>
