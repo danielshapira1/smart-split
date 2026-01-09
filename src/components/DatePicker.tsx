@@ -8,9 +8,11 @@ type Props = {
   onChange: (date: string) => void;
   className?: string;
   label?: string;
+  align?: 'left' | 'right';
+  direction?: 'up' | 'down';
 };
 
-export function DatePicker({ value, onChange, className, label }: Props) {
+export function DatePicker({ value, onChange, className, label, align = 'right', direction = 'down' }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
   // Create a Date object from the YYYY-MM-DD string
@@ -72,7 +74,11 @@ export function DatePicker({ value, onChange, className, label }: Props) {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full mt-2 w-72 z-50 p-4 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-in fade-in zoom-in-95 duration-200 right-0 font-sans">
+        <div className={`
+          absolute z-50 p-4 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-white/10 shadow-2xl animate-in fade-in zoom-in-95 duration-200 font-sans w-72
+          ${align === 'left' ? 'left-0 origin-top-left' : 'right-0 origin-top-right'}
+          ${direction === 'up' ? 'bottom-full mb-2 origin-bottom' : 'top-full mt-2 origin-top'}
+        `}>
 
           {/* Header */}
           <div className="flex items-center justify-between mb-4">

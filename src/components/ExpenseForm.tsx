@@ -141,6 +141,8 @@ export function ExpenseForm({ groupId, currentPayerName, categories, onClose, on
               <DatePicker
                 value={date}
                 onChange={setDate}
+                align="left"
+                direction="up"
               />
             </div>
           </div>
