@@ -519,6 +519,90 @@ end $$;
 
 
 -- ============================================================================
+-- RECURRING EXPENSES
+-- ============================================================================
+create table if not exists public.recurring_expenses (
+  id           uuid primary key default gen_random_uuid(),
+  group_id     uuid not null references public.groups(id) on delete cascade,
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  amount_cents integer not null check (amount_cents > 0),
+  currency     text not null default 'ILS',
+  description  text default '',
+  category     text default 'אחר',
+  frequency    text not null check (frequency in ('monthly', 'weekly')),
+  last_run     timestamptz,
+  next_run     date not null default current_date,
+  active       boolean default true,
+  created_at   timestamptz default now()
+);
+
+-- Policies
+alter table public.recurring_expenses enable row level security;
+
+drop policy if exists "select group recurring" on public.recurring_expenses;
+create policy "select group recurring"
+on public.recurring_expenses for select
+using (
+  exists (
+    select 1 from public.memberships m
+    where m.group_id = recurring_expenses.group_id
+      and m.user_id  = auth.uid()
+  )
+);
+
+drop policy if exists "manage own recurring" on public.recurring_expenses;
+create policy "manage own recurring"
+on public.recurring_expenses for all
+using (user_id = auth.uid())
+with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.memberships m
+    where m.group_id = recurring_expenses.group_id
+      and m.user_id  = auth.uid()
+  )
+);
+
+grant select, insert, update, delete on public.recurring_expenses to authenticated;
+
+-- Function
+create or replace function public.process_recurring_expenses()
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  r record;
+  new_next_run date;
+begin
+  for r in (
+    select * from public.recurring_expenses
+    where active = true
+      and next_run <= current_date
+  ) loop
+    INSERT INTO public.expenses (
+      group_id, user_id, amount_cents, currency, description, category, occurred_on
+    ) VALUES (
+      r.group_id, r.user_id, r.amount_cents, r.currency, r.description || ' (תשלום קבוע)', r.category, current_date
+    );
+
+    if r.frequency = 'monthly' then
+      new_next_run := r.next_run + interval '1 month';
+    elsif r.frequency = 'weekly' then
+      new_next_run := r.next_run + interval '1 week';
+    else
+      new_next_run := r.next_run + interval '1 month';
+    end if;
+
+    UPDATE public.recurring_expenses
+    SET last_run = now(), next_run = new_next_run
+    WHERE id = r.id;
+  end loop;
+end;
+$$;
+
+
+-- ============================================================================
 -- BACKUP SYSTEM
 -- ============================================================================
 
@@ -555,7 +639,7 @@ declare
   t text;
 begin
   -- List of tables to backup
-  foreach t in array array['profiles', 'groups', 'memberships', 'expenses', 'transfers', 'invites']
+  foreach t in array array['profiles', 'groups', 'memberships', 'expenses', 'transfers', 'invites', 'recurring_expenses']
   loop
     insert into public.daily_backups (table_name, table_data)
     select t, jsonb_agg(tbl)
@@ -584,6 +668,9 @@ begin
   insert into public.daily_backups (table_name, table_data)
   select 'invites', coalesce(jsonb_agg(t), '[]'::jsonb) from public.invites t;
 
+  insert into public.daily_backups (table_name, table_data)
+  select 'recurring_expenses', coalesce(jsonb_agg(t), '[]'::jsonb) from public.recurring_expenses t;
+
   -- Auto-cleanup: keep only last 30 days
   delete from public.daily_backups
   where backup_timestamp < now() - interval '30 days';
@@ -592,9 +679,9 @@ $$;
 
 -- 4. Schedule Job (At 03:00 AM every day)
 -- Safely remove existing job if it exists to avoid duplicates or errors
-SELECT cron.unschedule(jobid)
-FROM cron.job
-WHERE jobname = 'daily-backup';
-
--- Schedule the new job
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'daily-backup';
 select cron.schedule('daily-backup', '0 3 * * *', 'select public.capture_daily_snapshot()');
+
+-- Schedule Recurring Job (Every day at 04:00 AM)
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'process-recurring';
+select cron.schedule('process-recurring', '0 4 * * *', 'select public.process_recurring_expenses()');

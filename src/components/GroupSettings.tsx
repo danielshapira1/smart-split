@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Download, Upload, X, AlertTriangle, Check, Loader2, User, LogOut } from 'lucide-react';
+import { Download, Upload, X, AlertTriangle, Check, Loader2, User, LogOut, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import type { Group, Profile } from '../lib/types';
+import { RecurringExpensesList } from './RecurringExpensesList';
 
 type Props = {
     group: Group;
@@ -15,6 +16,7 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [replaceMode, setReplaceMode] = useState(false);
+    const [showRecurring, setShowRecurring] = useState(false);
 
     // Profile State
     const [displayName, setDisplayName] = useState(profile?.display_name || '');
@@ -39,12 +41,7 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
             if (error) throw error;
 
             setMessage({ type: 'success', text: 'הפרופיל עודכן בהצלחה!' });
-            // Refresh main app potentially? The parent should ideally listen to changes or we rely on re-fetch
-            onRefresh(); // Using onRefresh trigger to maybe reload context if needed, though App.tsx usually re-fetches profile on its own schedule.
-            // Actually App.tsx fetches profile once. We might need a way to tell App to refresh profile. 
-            // For now, let's rely on the fact that App might not auto-update immediately unless we force it, 
-            // but user sees "Success" here.
-
+            onRefresh();
         } catch (err: any) {
             console.error('Profile update failed:', err);
             setMessage({ type: 'error', text: 'שגיאה בעדכון הפרופיל: ' + err.message });
@@ -120,7 +117,7 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // Reset value so we can select the same file again if needed
+        // Reset value
         e.target.value = '';
 
         if (replaceMode) {
@@ -158,14 +155,9 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
             }
 
             const newExpenses = (json.expenses || []).map((ex: any) => {
-                // We strip ID to create new ones
-                // We try to keep the original user_id. 
-                // Note: 'payer_name' logic removed because the column does not exist in the DB.
-                // We rely on 'user_id' being valid or just displaying 'Unknown' if the user is missing.
-
                 return {
-                    group_id: group.id, // Enforce current group
-                    user_id: ex.user_id, // Keep original user if possible
+                    group_id: group.id,
+                    user_id: ex.user_id,
                     amount_cents: ex.amount_cents,
                     currency: ex.currency,
                     description: ex.description,
@@ -186,7 +178,6 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
 
             // Bulk insert
             if (replaceMode) {
-                // Delete existing first
                 const { error: dErr1 } = await supabase.from('expenses').delete().eq('group_id', group.id);
                 if (dErr1) throw dErr1;
                 const { error: dErr2 } = await supabase.from('transfers').delete().eq('group_id', group.id);
@@ -224,107 +215,142 @@ export function GroupSettings({ group, profile, onClose, onRefresh, onLogout }: 
                     <X className="w-5 h-5" />
                 </button>
 
-                <h2 className="text-xl font-bold text-zinc-100">הגדרות</h2>
+                <h2 className="text-xl font-bold text-zinc-100">
+                    {showRecurring ? 'הוראות קבע' : 'הגדרות'}
+                </h2>
 
-                {/* Profile Section */}
-                <div className="space-y-3 pt-2">
-                    <h3 className="font-medium text-zinc-200 flex items-center gap-2 text-sm">
-                        <User className="w-4 h-4 text-indigo-400" /> פרופיל משתמש
-                    </h3>
-                    <div className="space-y-2">
-                        <div>
-                            <label className="text-xs text-zinc-500 block mb-1">שם לתצוגה</label>
-                            <input
-                                value={displayName}
-                                onChange={e => setDisplayName(e.target.value)}
-                                className="w-full rounded-lg bg-zinc-900/50 border border-zinc-700/50 px-3 py-2 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-zinc-500"
-                                placeholder="השם שלך בקבוצה"
-                            />
+                {showRecurring ? (
+                    <div className="animate-in slide-in-from-right-4 duration-200">
+                        <button
+                            onClick={() => setShowRecurring(false)}
+                            className="text-sm text-indigo-400 hover:text-indigo-300 mb-4 flex items-center gap-1"
+                        >
+                            ← חזרה להגדרות
+                        </button>
+                        <RecurringExpensesList group={group} />
+                    </div>
+                ) : (
+                    <>
+                        {/* Profile Section */}
+                        <div className="space-y-3 pt-2">
+                            <h3 className="font-medium text-zinc-200 flex items-center gap-2 text-sm">
+                                <User className="w-4 h-4 text-indigo-400" /> פרופיל משתמש
+                            </h3>
+                            <div className="space-y-2">
+                                <div>
+                                    <label className="text-xs text-zinc-500 block mb-1">שם לתצוגה</label>
+                                    <input
+                                        value={displayName}
+                                        onChange={e => setDisplayName(e.target.value)}
+                                        className="w-full rounded-lg bg-zinc-900/50 border border-zinc-700/50 px-3 py-2 text-sm text-white focus:ring-1 focus:ring-indigo-500 outline-none transition-colors placeholder:text-zinc-500"
+                                        placeholder="השם שלך בקבוצה"
+                                    />
+                                </div>
+                                <button
+                                    onClick={handleSaveProfile}
+                                    disabled={savingProfile}
+                                    className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition-colors w-min whitespace-nowrap"
+                                >
+                                    {savingProfile ? 'שומר...' : 'שמור שינויים'}
+                                </button>
+                            </div>
                         </div>
+
+                        <hr className="border-zinc-700/50 my-1" />
+
+                        {/* Recurring Expenses Entry */}
                         <button
-                            onClick={handleSaveProfile}
-                            disabled={savingProfile}
-                            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-md transition-colors w-min whitespace-nowrap"
+                            onClick={() => setShowRecurring(true)}
+                            className="w-full p-4 bg-zinc-900/50 hover:bg-zinc-800/50 rounded-xl border border-zinc-700/50 flex items-center justify-between group transition-colors"
                         >
-                            {savingProfile ? 'שומר...' : 'שמור שינויים'}
+                            <div className="flex items-center gap-2">
+                                <div className="p-2 bg-indigo-500/10 rounded-lg group-hover:bg-indigo-500/20 transition-colors">
+                                    <Calendar className="w-4 h-4 text-indigo-400" />
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-sm font-medium text-zinc-200">הוראות קבע</div>
+                                    <div className="text-xs text-zinc-500">ניהול תשלומים קבועים</div>
+                                </div>
+                            </div>
+                            <div className="text-zinc-500">←</div>
                         </button>
-                    </div>
-                </div>
 
-                <hr className="border-zinc-700/50 my-1" />
+                        <hr className="border-zinc-700/50 my-1" />
 
-                <div className="space-y-4">
-                    {/* Export */}
-                    <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-700/50">
-                        <h3 className="font-medium text-zinc-200 mb-1 flex items-center gap-2">
-                            <Download className="w-4 h-4 text-indigo-400" /> ייצוא נתונים
-                        </h3>
-                        <p className="text-xs text-zinc-500 mb-3">
-                            הורד קובץ JSON עם כל ההוצאות וההעברות של הקבוצה לגיבוי.
-                        </p>
-                        <button
-                            onClick={handleExport}
-                            disabled={loading}
-                            className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg text-sm transition-colors text-zinc-200 flex items-center justify-center gap-2"
-                        >
-                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'ייצא לקובץ'}
-                        </button>
-                    </div>
+                        <div className="space-y-4">
+                            {/* Export */}
+                            <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-700/50">
+                                <h3 className="font-medium text-zinc-200 mb-1 flex items-center gap-2">
+                                    <Download className="w-4 h-4 text-indigo-400" /> ייצוא נתונים
+                                </h3>
+                                <p className="text-xs text-zinc-500 mb-3">
+                                    הורד קובץ JSON עם כל ההוצאות וההעברות של הקבוצה לגיבוי.
+                                </p>
+                                <button
+                                    onClick={handleExport}
+                                    disabled={loading}
+                                    className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg text-sm transition-colors text-zinc-200 flex items-center justify-center gap-2"
+                                >
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'ייצא לקובץ'}
+                                </button>
+                            </div>
 
-                    {/* Import */}
-                    <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-700/50">
-                        <h3 className="font-medium text-zinc-200 mb-1 flex items-center gap-2">
-                            <Upload className="w-4 h-4 text-emerald-400" /> ייבוא נתונים
-                        </h3>
-                        <p className="text-xs text-zinc-500 mb-3">
-                            טען נתונים מקובץ גיבוי.
-                        </p>
+                            {/* Import */}
+                            <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-700/50">
+                                <h3 className="font-medium text-zinc-200 mb-1 flex items-center gap-2">
+                                    <Upload className="w-4 h-4 text-emerald-400" /> ייבוא נתונים
+                                </h3>
+                                <p className="text-xs text-zinc-500 mb-3">
+                                    טען נתונים מקובץ גיבוי.
+                                </p>
 
-                        <label className="flex items-center gap-2 mb-3 cursor-pointer group">
-                            <input
-                                type="checkbox"
-                                checked={replaceMode}
-                                onChange={e => setReplaceMode(e.target.checked)}
-                                className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-indigo-600 focus:ring-indigo-600 focus:ring-offset-zinc-900"
-                            />
-                            <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
-                                נקה נתונים קיימים לפני הייבוא (שחזור מלא)
-                            </span>
-                        </label>
+                                <label className="flex items-center gap-2 mb-3 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        checked={replaceMode}
+                                        onChange={e => setReplaceMode(e.target.checked)}
+                                        className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-indigo-600 focus:ring-indigo-600 focus:ring-offset-zinc-900"
+                                    />
+                                    <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors">
+                                        נקה נתונים קיימים לפני הייבוא (שחזור מלא)
+                                    </span>
+                                </label>
 
-                        <input
-                            type="file"
-                            accept=".json"
-                            className="hidden"
-                            ref={fileInputRef}
-                            onChange={handleFileChange}
-                        />
-                        <button
-                            onClick={handleImportScroll}
-                            disabled={loading}
-                            className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg text-sm transition-colors text-zinc-200 flex items-center justify-center gap-2"
-                        >
-                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'בחר קובץ לייבוא'}
-                        </button>
-                    </div>
-                </div>
+                                <input
+                                    type="file"
+                                    accept=".json"
+                                    className="hidden"
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                />
+                                <button
+                                    onClick={handleImportScroll}
+                                    disabled={loading}
+                                    className="w-full py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg text-sm transition-colors text-zinc-200 flex items-center justify-center gap-2"
+                                >
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'בחר קובץ לייבוא'}
+                                </button>
+                            </div>
+                        </div>
 
-                {message && (
-                    <div className={`p-3 rounded-lg text-sm flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-900/30 text-emerald-300 border border-emerald-800' : 'bg-red-900/30 text-red-300 border border-red-800'
-                        }`}>
-                        {message.type === 'success' ? <Check className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
-                        <span>{message.text}</span>
-                    </div>
+                        {message && (
+                            <div className={`p-3 rounded-lg text-sm flex items-start gap-2 ${message.type === 'success' ? 'bg-emerald-900/30 text-emerald-300 border border-emerald-800' : 'bg-red-900/30 text-red-300 border border-red-800'
+                                }`}>
+                                {message.type === 'success' ? <Check className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                                <span>{message.text}</span>
+                            </div>
+                        )}
+
+                        <div className="mt-2 border-t border-zinc-700/50 pt-4">
+                            <button
+                                onClick={onLogout}
+                                className="w-full py-3 rounded-xl border border-red-900/30 bg-red-900/10 hover:bg-red-900/20 text-red-400 hover:text-red-300 transition-colors flex items-center justify-center gap-2 font-medium"
+                            >
+                                <LogOut className="w-4 h-4" /> התנתק
+                            </button>
+                        </div>
+                    </>
                 )}
-
-                <div className="mt-2 border-t border-zinc-700/50 pt-4">
-                    <button
-                        onClick={onLogout}
-                        className="w-full py-3 rounded-xl border border-red-900/30 bg-red-900/10 hover:bg-red-900/20 text-red-400 hover:text-red-300 transition-colors flex items-center justify-center gap-2 font-medium"
-                    >
-                        <LogOut className="w-4 h-4" /> התנתק
-                    </button>
-                </div>
             </div>
         </div>
     );
