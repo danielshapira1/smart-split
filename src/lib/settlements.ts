@@ -3,6 +3,8 @@
 export type Member = {
   user_id: string;
   name: string;            // display_name או מייל
+  display_name?: string;
+  email?: string;
 };
 
 export type Expense = {
@@ -88,7 +90,7 @@ export function computeSettlements(nets: Net[]): Transfer[] {
       });
 
       c.net_cents -= take;
-      debt       -= take;
+      debt -= take;
     }
   }
 

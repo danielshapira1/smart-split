@@ -96,9 +96,12 @@ export async function acceptInvite(token: string): Promise<void> {
 }
 
 // הוספת/עדכון הוצאה expenses
-export async function saveExpenseRow(exp: ExpenseInsert & { id?: string }): Promise<void> {
-  if (exp.id) {
-    // Update
+export async function saveExpenseRow(row: ExpenseInsert & { id?: string, splits?: { user_id: string; amount_cents: number }[] }): Promise<void> {
+  const { splits, ...exp } = row;
+  let expenseId = exp.id;
+
+  if (expenseId) {
+    // Update existing expense
     const { id, ...fields } = exp;
     const res = await rest(`/rest/v1/expenses?id=eq.${id}`, {
       method: "PATCH",
@@ -106,12 +109,37 @@ export async function saveExpenseRow(exp: ExpenseInsert & { id?: string }): Prom
     });
     if (!res.ok) throw new Error(await res.text());
   } else {
-    // Insert
+    // Insert new expense
     const res = await rest(`/rest/v1/expenses`, {
       method: "POST",
       body: JSON.stringify([exp]),
+      headers: { "Prefer": "return=representation" } // Ask to return the created row
     });
     if (!res.ok) throw new Error(await res.text());
+    const created = await res.json();
+    if (created && created[0]) {
+      expenseId = created[0].id;
+    }
+  }
+
+  // Handle Splits if provided
+  if (splits && splits.length > 0 && expenseId) {
+    // First, clear existing splits (simple approach for updates)
+    // In a real optimized scenario, we might diff them, but deleting and re-inserting is safer for now.
+    await rest(`/rest/v1/expense_splits?expense_id=eq.${expenseId}`, { method: "DELETE" });
+
+    // Insert new splits
+    const splitsToInsert = splits.map(s => ({
+      expense_id: expenseId,
+      user_id: s.user_id,
+      amount_cents: s.amount_cents
+    }));
+
+    const resSplits = await rest(`/rest/v1/expense_splits`, {
+      method: "POST",
+      body: JSON.stringify(splitsToInsert)
+    });
+    if (!resSplits.ok) throw new Error(await resSplits.text());
   }
 }
 

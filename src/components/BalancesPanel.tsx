@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { UserChip, userBg, userBorder, userColor } from '../lib/colors';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { saveTransfer } from '../lib/supaRest';
@@ -30,13 +31,19 @@ export type Expense = {
   payer_name?: string | null;
 };
 
+type NetBalance = {
+  group_id: string;
+  user_id: string;
+  net_cents: number;
+};
+
 type Props = {
   members: Member[];
   expenses: Expense[];
-  transfers: Transfer[];  // <--- Added support for transfers
-  groupId: string;        // <--- Need groupId for saving transfers
-  currentUserId: string;  // <--- Need to know who I am
-  onRefresh?: () => void; // <--- Callback to refresh data
+  transfers: Transfer[];
+  groupId: string;
+  currentUserId: string;
+  onRefresh?: () => void;
   currency?: string;
 };
 
@@ -53,28 +60,13 @@ const toCents = (v: unknown) => {
 const clampCents = (n: unknown) => Math.max(0, toCents(n));
 
 const memberId = (m: Member | undefined | null) => (m?.uid || m?.user_id || '').trim();
-const safeId = (s: string | undefined | null) => (s ?? '').trim();
 const nameOfMember = (m: Member | undefined, fallback = ''): string => {
-  const n = m?.name || m?.display_name || m?.email || fallback;
+  const n = m?.display_name || m?.name || m?.email || fallback;
   return n?.trim() || 'Unknown';
 };
 
 const fmtCurrency = (cents: number, currency = 'ILS') =>
   (cents / 100).toLocaleString('he-IL', { style: 'currency', currency });
-
-/** פיזור שווה של סכום בסנטים על רשימת משתמשים */
-function evenSplitCents(totalCents: number, ids: string[]) {
-  const n = Math.max(1, ids.length);
-  const base = Math.floor(totalCents / n);
-  let remainder = totalCents - base * n;
-  const out = new Map<string, number>();
-  for (const id of ids) {
-    const extra = remainder > 0 ? 1 : 0;
-    out.set(id, base + extra);
-    remainder -= extra;
-  }
-  return out;
-}
 
 /** Greedy settlement: מדביק חייבים (שלילי) מול זכאים (חיובי) */
 function settleGreedy(nets: Array<{ id: string; net: number }>) {
@@ -126,8 +118,32 @@ export default function BalancesPanel({
   currency = 'ILS'
 }: Props) {
   const [settling, setSettling] = useState<string | null>(null); // "from-to" key
-  const [loading, setLoading] = useState(false);
+  const [dbBalances, setDbBalances] = useState<NetBalance[]>([]);
+  const [loadingBalances, setLoadingBalances] = useState(false);
+
   const [targetDate, setTargetDate] = useState(new Date()); // For monthly filter
+
+  // Fetch true balances from View whenever expenses/transfers change
+  useEffect(() => {
+    if (!groupId) return;
+
+    // We use a small timeout to let the DB update view (though it should be immediate in same transaction usually,
+    // but client refresh might be faster). View is not materialized, so it's always fresh.
+    const fetchB = async () => {
+      setLoadingBalances(true);
+      const { data, error } = await supabase
+        .from('net_balances')
+        .select('*')
+        .eq('group_id', groupId);
+
+      if (!error && data) {
+        setDbBalances(data);
+      }
+      setLoadingBalances(false);
+    };
+
+    fetchB();
+  }, [groupId, expenses, transfers]); // Re-fetch when local data changes
 
   const handleNextMonth = () => {
     setTargetDate(d => {
@@ -158,105 +174,8 @@ export default function BalancesPanel({
   // Derived members for the charts (ensure name exists)
   const chartMembers = useMemo(() => members.map(m => ({
     user_id: m.user_id || m.uid,
-    name: m.name || m.display_name || m.email
+    name: m.display_name || m.name || m.email
   })), [members]);
-
-  // 1. Participant IDs
-  const participantIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const m of members) {
-      const id = memberId(m);
-      if (id) set.add(id);
-    }
-    for (const e of expenses) {
-      const id = safeId(e.user_id);
-      if (id) set.add(id);
-    }
-    // Transfers participants too
-    for (const t of transfers) {
-      if (t.from_user) set.add(t.from_user);
-      if (t.to_user) set.add(t.to_user);
-    }
-    return Array.from(set).sort();
-  }, [members, expenses, transfers]);
-
-  // 2. Paid By (Expenses)
-  const paidBy = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const id of participantIds) map.set(id, 0);
-    for (const e of expenses) {
-      const id = safeId(e.user_id);
-      if (!id) continue;
-      map.set(id, (map.get(id) ?? 0) + clampCents(e.amount_cents));
-    }
-    return map;
-  }, [participantIds, expenses]);
-
-  // 3. Owe By (Split logic - currently Even Split only)
-  const oweBy = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const id of participantIds) map.set(id, 0);
-    if (participantIds.length === 0) return map;
-
-    for (const e of expenses) {
-      const amount = clampCents(e.amount_cents);
-      if (amount <= 0) continue;
-      // TODO: Future supports unequal split here
-      const share = evenSplitCents(amount, participantIds);
-      for (const [id, chunk] of share.entries()) {
-        map.set(id, (map.get(id) ?? 0) + chunk);
-      }
-    }
-    return map;
-  }, [participantIds, expenses]);
-
-  // 4. Transfers (Settlements)
-  // We need to count how much each person sent (reduce debt) or received (reduce credit)
-  const transferMap = useMemo(() => {
-    const sent = new Map<string, number>();
-    const received = new Map<string, number>();
-    for (const t of transfers) {
-      const amt = clampCents(t.amount_cents);
-      sent.set(t.from_user, (sent.get(t.from_user) ?? 0) + amt);
-      received.set(t.to_user, (received.get(t.to_user) ?? 0) + amt);
-    }
-    return { sent, received };
-  }, [transfers]);
-
-  // 5. Net Balances
-  const nets = useMemo(() => {
-    return participantIds.map((id) => {
-      const paidExp = paidBy.get(id) ?? 0;
-      const oweExp = oweBy.get(id) ?? 0;
-      const sentTr = transferMap.sent.get(id) ?? 0;
-      const receivedTr = transferMap.received.get(id) ?? 0;
-
-      // Net = (Paid Expenses + Sent Transfers) - (My Share of Expenses + Received Transfers)
-      // If result > 0: "I gave more than I took" -> Credit
-      // If result < 0: "I took more than I gave" -> Debt
-      const net = (paidExp + sentTr) - (oweExp + receivedTr);
-
-      return { id, net };
-    });
-  }, [participantIds, paidBy, oweBy, transferMap]);
-
-  // Totals
-  const totalSpent = useMemo(
-    () => expenses.reduce((s, e) => s + clampCents(e.amount_cents), 0),
-    [expenses]
-  );
-  const totalDebt = useMemo(
-    () => nets.filter((n) => n.net < 0).reduce((s, n) => s + Math.abs(n.net), 0),
-    [nets]
-  );
-  const totalCredit = useMemo(
-    () => nets.filter((n) => n.net > 0).reduce((s, n) => s + n.net, 0),
-    [nets]
-  );
-
-  // Suggested settlements
-  const suggestedTransfers = useMemo(() => settleGreedy(nets), [nets]);
-  const isBalanced = suggestedTransfers.length === 0;
 
   // Name resolution
   const nameById = useMemo(() => {
@@ -266,22 +185,55 @@ export default function BalancesPanel({
       if (!id) continue;
       map.set(id, nameOfMember(m, id.slice(0, 6)));
     }
-    for (const e of expenses) {
-      const id = safeId(e.user_id);
-      if (!id || map.has(id)) continue;
-      const fallback = (e.payer_name ?? '') || id.slice(0, 6);
-      map.set(id, fallback);
-    }
     return map;
-  }, [members, expenses]);
+  }, [members]);
 
   const nameOf = (id: string) => nameById.get(id) ?? id.slice(0, 6);
-  const twoMembers = participantIds.length === 2;
 
-  // --- Actions ---
+  // Combine DB balances with member info
+  // The View returns net_cents > 0 (Owed/Zakai) or < 0 (Owes/Chayav).
+  const nets = useMemo(() => {
+    // Map all members to ensure we show everyone even if 0 balance (optional, but good)
+    // Or just map the rows from DB? DB view includes all members in group (left join in view).
+
+    // If dbBalances is empty, we show 0 for all members
+    const map = new Map<string, number>();
+    for (const m of members) {
+      const id = memberId(m);
+      if (id) map.set(id, 0);
+    }
+
+    for (const b of dbBalances) {
+      map.set(b.user_id, b.net_cents);
+    }
+
+    return Array.from(map.entries()).map(([id, net]) => ({
+      id,
+      net
+    })).sort((a, b) => b.net - a.net); // Highest credit first
+  }, [dbBalances, members]);
+
+  // Totals
+  const totalSpent = useMemo(
+    () => expenses.reduce((s, e) => s + clampCents(e.amount_cents), 0),
+    [expenses]
+  );
+  // Calculate total debt from the nets view (sum of positive balances = sum of negative balances ideally)
+  const totalDebt = useMemo(
+    () => nets.filter((n) => n.net < 0).reduce((s, n) => s + Math.abs(n.net), 0),
+    [nets]
+  );
+
+  // Suggested settlements using the correct nets
+  const suggestedTransfers = useMemo(() => settleGreedy(nets), [nets]);
+  const isBalanced = suggestedTransfers.length === 0;
+
+  const twoMembers = members.length === 2; // Approximate check
+
+  /* --- Actions --- */
 
   const handleSettle = async (fromId: string, toId: string, maxAmount: number) => {
-    if (loading) return;
+    if (loadingBalances) return;
 
     // Default to full amount, but allow edit
     const def = (maxAmount / 100).toFixed(2);
@@ -297,7 +249,6 @@ export default function BalancesPanel({
     // Convert back to cents
     const amountCents = Math.round(val * 100);
 
-    setLoading(true);
     setSettling(`${fromId}-${toId}`);
     try {
       await saveTransfer({
@@ -311,7 +262,6 @@ export default function BalancesPanel({
     } catch (err: any) {
       alert('שגיאה בשמירת העברה: ' + err.message);
     } finally {
-      setLoading(false);
       setSettling(null);
     }
   };
@@ -348,6 +298,9 @@ export default function BalancesPanel({
         </button>
       </div>
 
+      {/* Charts */}
+      {/* Note: Charts currently show RAW expenses data, not net balances. This is correct for "Pie Chart" etc. */}
+
       {/* Chart: Distribution */}
       <ExpensesPieChart expenses={monthlyExpenses} currency={currency} />
 
@@ -362,13 +315,13 @@ export default function BalancesPanel({
         <div className="text-sm font-medium mb-3 text-zinc-300">מאזנים אישיים</div>
         <ul className="space-y-2">
           {nets.map((n) => {
-            const owes = n.net < -1; // tolerance
-            const credits = n.net > 1;
+            const owes = n.net < -5; // tolerance 5 cents
+            const credits = n.net > 5;
             const zero = !owes && !credits;
 
             const otherName =
               twoMembers && owes
-                ? nameOf(participantIds.find((id) => id !== n.id) || '')
+                ? nameOf(nets.find((x) => x.id !== n.id)?.id || '')
                 : 'לקבוצה';
 
             return (
@@ -399,6 +352,7 @@ export default function BalancesPanel({
               </li>
             );
           })}
+          {nets.length === 0 && <p className="text-zinc-500 text-xs text-center py-2">אין נתונים</p>}
         </ul>
       </section>
 
@@ -411,9 +365,7 @@ export default function BalancesPanel({
           <ul className="space-y-2">
             {suggestedTransfers.map((t, idx) => {
               const key = `${t.from}-${t.to}`;
-              const isMe = t.from === currentUserId || t.to === currentUserId; // Can I settle this?
-              // Specifically, I can only PAY if I am 'from', or received if 'to' (maybe mark as received).
-              // For simplicity, allowed if I am either party OR admin (omitted here for simplicity).
+              const isMe = t.from === currentUserId || t.to === currentUserId;
               const canSettle = currentUserId && (t.from === currentUserId || t.to === currentUserId);
 
               return (
@@ -435,7 +387,7 @@ export default function BalancesPanel({
                   {canSettle && (
                     <button
                       onClick={() => handleSettle(t.from, t.to, t.amount)}
-                      disabled={loading}
+                      disabled={loadingBalances || !!settling}
                       className="text-xs bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-600/30 px-3 py-2 rounded-lg transition-colors whitespace-nowrap"
                     >
                       {settling === key ? 'שומר...' : 'סמן כשולם'}
@@ -445,12 +397,6 @@ export default function BalancesPanel({
               );
             })}
           </ul>
-        )}
-
-        {!isBalanced && (
-          <p className="mt-4 text-xs text-zinc-500 text-center">
-            לחיצה על "סמן כשולם" תאפס את החוב הזה ע"י יצירת העברה.
-          </p>
         )}
       </section>
     </div>

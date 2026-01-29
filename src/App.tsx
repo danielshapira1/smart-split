@@ -189,22 +189,44 @@ export default function App() {
   useEffect(() => {
     if (!session || !group) {
       setRole('member');
+      setMembers([]); // reset members
       return;
     }
     (async () => {
-      const { data, error } = await supabase
+      // 1. Fetch Role
+      const { data: roleData, error: roleError } = await supabase
         .from('memberships')
         .select('role')
         .eq('user_id', session.user.id)
         .eq('group_id', group.id)
         .maybeSingle();
 
-      if (error) {
-        console.warn('load role failed:', error.message);
+      if (roleError) {
+        console.warn('load role failed:', roleError.message);
         setRole('member');
-        return;
+      } else {
+        setRole(roleData?.role ?? 'member');
       }
-      setRole(data?.role ?? 'member');
+
+      // 2. Fetch Members (Profiles) via Secure RPC
+      // This bypasses RLS issues and guarantees we get whatever data exists
+      const { data: membersData, error: membersError } = await supabase
+        .rpc('get_group_members', { p_group_id: group.id });
+
+      if (membersError) {
+        console.error('fetch members rpc failed:', membersError);
+        setMembers([]);
+      } else {
+        // Transform to Member[]
+        const mapped: Member[] = (membersData || []).map((m: any) => ({
+          user_id: m.user_id,
+          name: m.display_name || m.email || 'חבר לא ידוע',
+          display_name: m.display_name,
+          email: m.email
+        }));
+        setMembers(mapped);
+      }
+
     })();
   }, [session?.user?.id, group?.id]);
 
@@ -315,70 +337,77 @@ export default function App() {
 
   /* ---------- סיכום למעלה: “מי חייב למי” ---------- */
   const meId = session?.user?.id ?? '';
+  const [myNetBalance, setMyNetBalance] = useState<number | null>(null);
 
-  // כל המשתתפים לפי ההוצאות בפועל
+  // Fetch true balance from view whenever expenses change (or group changes)
+  useEffect(() => {
+    if (!group || !meId) {
+      setMyNetBalance(0);
+      return;
+    }
+
+    const fetchBalance = async () => {
+      const { data, error } = await supabase
+        .from('net_balances')
+        .select('net_cents')
+        .eq('group_id', group.id)
+        .eq('user_id', meId)
+        .maybeSingle();
+
+      if (!error && data) {
+        setMyNetBalance(data.net_cents);
+      } else {
+        setMyNetBalance(0);
+      }
+    };
+
+    fetchBalance();
+  }, [group, meId, expenses]); // depend on expenses to refresh when they change
+
+  // Parsing participant names for the summary text
   const participantIds = useMemo(() => {
     const s = new Set<string>();
     for (const e of expenses) if (e.user_id) s.add(e.user_id);
     return Array.from(s);
   }, [expenses]);
 
-  const isPair = participantIds.length === 2;
+  const isPair = members.length === 2; // Better to check members list than expense participants
 
   const otherId = useMemo(() => {
     if (!isPair) return '';
-    return participantIds.find((id) => id !== meId) || '';
-  }, [isPair, participantIds, meId]);
+    return members.find(m => m.user_id !== meId)?.user_id || '';
+  }, [isPair, members, meId]);
 
   const otherName = useMemo(() => {
     if (!otherId) return 'המשתתף/ת השני/ה';
     const m = members.find((x) => x.user_id === otherId);
-    // If we have a real name (not same as ID), use it.
-    if (m?.name && m.name !== otherId) return m.name;
-
-    // Fallback: look for name in expenses (maybe partial update or not in members list yet)
-    const exp = expenses.find((e) => e.user_id === otherId && (e.payer || e.payer_name));
-    return (
-      (exp?.payer?.display_name || exp?.payer?.email || exp?.payer_name) ??
-      m?.name ??
-      'חבר קבוצה'
-    );
-  }, [otherId, members, expenses]);
-
-  // סכומים – תמיד על בסיס כל ההוצאות (לא מושפעים מסינון התצוגה)
-  const totalCentsAll = useMemo(
-    () => expenses.reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
-    [expenses]
-  );
-  const myPaidAll = useMemo(
-    () =>
-      expenses
-        .filter((e) => e.user_id === meId)
-        .reduce((sum, e) => sum + (e?.amount_cents ?? 0), 0),
-    [expenses, meId]
-  );
-
-  const n = participantIds.length || 1;
-  const myShare = Math.round(totalCentsAll / n);
-  const netCents = myShare - myPaidAll; // >0 אני חייב; <0 חייבים לי
+    return m?.display_name || m?.email || m?.name || 'חבר קבוצה';
+  }, [otherId, members]);
 
   const summaryText = useMemo(() => {
     if (!group) return '';
-    if (expenses.length === 0) return 'אין הוצאות להצגה';
+    if (myNetBalance === null) return 'מחשב...';
 
+    const netCents = myNetBalance;
     const abs = Math.abs(netCents) / 100;
+
     if (netCents > 0) {
-      return isPair
-        ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}`
-        : `את/ה חייב/ת לקבוצה ₪${abs.toFixed(2)}`;
-    }
-    if (netCents < 0) {
+      // Positive = I am owed money (Wait, view logic: paid - owed. If result > 0, I paid more than I owe => I am owed money)
+      // Standard definition: Net Balance > 0 means you are OWED. Net Balance < 0 means you OWE.
+      // Let's verify view:
+      // paid_cents - share_owed_cents - transfers_out + transfers_in
+      // If I paid 100, and equal split is 50. 100 - 50 = +50. I am owed 50. Correct.
       return isPair
         ? `${otherName} חייב/ת לך ₪${abs.toFixed(2)}`
         : `הקבוצה חייבת לך ₪${abs.toFixed(2)}`;
     }
+    if (netCents < 0) {
+      return isPair
+        ? `את/ה חייב/ת ל${otherName} ₪${abs.toFixed(2)}`
+        : `את/ה חייב/ת לקבוצה ₪${abs.toFixed(2)}`;
+    }
     return 'מאוזנים';
-  }, [group, expenses.length, netCents, isPair, otherName]);
+  }, [group, myNetBalance, isPair, otherName]);
 
   const currentPayerName =
     profile?.display_name || profile?.email || session?.user?.email || 'משתמש';
@@ -438,6 +467,34 @@ export default function App() {
     }
   };
 
+
+
+  // Rescue 'Unknown' members by looking at expenses history
+  // If we have an expense from this user, we likely have their profile name loaded there
+  const enrichedMembers = useMemo(() => {
+    return members.map(m => {
+      const isUnknown = !m.name || m.name === 'חבר לא ידוע' || m.name === 'Unknown';
+      if (!isUnknown) return m;
+
+      // Search in loaded expenses
+      const found = expenses.find((e: any) => e.user_id === m.user_id);
+      if (found) {
+        // 'payer' is populated by useRealtimeExpenses usually, or 'profiles' from raw query
+        const p = (found as any).payer || (found as any).profiles;
+        const newName = p?.display_name || p?.email || (found as any).payer_name;
+        if (newName) {
+          return {
+            ...m,
+            name: newName,
+            display_name: p?.display_name || m.display_name,
+            email: p?.email || m.email
+          };
+        }
+      }
+      return m;
+    });
+  }, [members, expenses]);
+
   const confirmDelete = async () => {
     if (!expenseToDelete) return;
     try {
@@ -477,6 +534,10 @@ export default function App() {
   }
 
   /* ---------- render with group ---------- */
+
+  /* ---------- render with group ---------- */
+
+
   return (
     <div className="max-w-md mx-auto h-full flex flex-col bg-zinc-900 min-h-screen">
       {/* header */}
@@ -622,7 +683,7 @@ export default function App() {
         </main>
       ) : (
         <BalancesPanel
-          members={members}
+          members={enrichedMembers}
           expenses={expenses as any}
           transfers={transfers}
           groupId={group.id}
@@ -651,18 +712,16 @@ export default function App() {
       {showForm && (
         <ExpenseForm
           groupId={group.id}
-          currentPayerName={currentPayerName}
+          currentPayerName={greetName}
           categories={CATEGORIES}
-          initialData={expenseToEdit}
-          onClose={() => {
-            setShowForm(false);
-            setExpenseToEdit(null);
-          }}
+          members={enrichedMembers}
+          onClose={() => setShowForm(false)}
           onSaved={() => {
             setShowForm(false);
             setExpenseToEdit(null);
             refresh();
           }}
+          initialData={expenseToEdit}
         />
       )}
 
