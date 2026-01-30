@@ -175,7 +175,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, members, on
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-zinc-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl">
+      <div className="bg-zinc-900/80 backdrop-blur-xl border border-white/10 w-full max-w-md rounded-2xl p-4 sm:p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-bold text-zinc-100">
           {initialData ? "עריכת הוצאה" : "הוספת הוצאה"}
         </h2>
@@ -312,7 +312,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, members, on
             </div>
           )}
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="number"
               inputMode="decimal"
@@ -321,7 +321,7 @@ export function ExpenseForm({ groupId, currentPayerName, categories, members, on
               onChange={(e) => setAmount(e.target.value)}
               className="flex-1 rounded-xl border border-white/5 bg-zinc-800/50 px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder-zinc-500 font-mono text-lg"
             />
-            <div className="w-40">
+            <div className="w-full sm:w-40">
               <DatePicker
                 value={date}
                 onChange={setDate}
