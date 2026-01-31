@@ -29,11 +29,18 @@ type Props = {
 export function ExpenseForm({ groupId, currentPayerName, categories, members, onClose, onSaved, initialData }: Props) {
   // State for members
   const [localMembers, setLocalMembers] = useState<Member[]>(members);
+  const [currentUserId, setCurrentUserId] = useState<string>("");
 
   // Fetch members on mount
   React.useEffect(() => {
     let mounted = true;
     async function loadMembers() {
+      // Get current session user
+      const { data: { session } } = await supabase.auth.getSession();
+      if (mounted && session?.user) {
+        setCurrentUserId(session.user.id);
+      }
+
       // Use the secure RPC that guarantees names
       const { data, error } = await supabase.rpc('get_group_members', { p_group_id: groupId });
       if (!error && data && mounted) {
@@ -90,11 +97,21 @@ export function ExpenseForm({ groupId, currentPayerName, categories, members, on
     return activeMembers.map(m => ({ user_id: m.user_id!, amount: 0 }));
   });
 
-  // Persist splitMode changes
   const handleSplitModeChange = (mode: 'equal' | 'direct' | 'custom') => {
     setSplitMode(mode);
     localStorage.setItem('expense_split_mode', mode);
   };
+
+  // Auto-select beneficiary in direct mode
+  React.useEffect(() => {
+    if (splitMode === 'direct' && !directBeneficiary && currentUserId && activeMembers.length > 0) {
+      // Find a member that is not the current user
+      const otherMember = activeMembers.find(m => m.user_id !== currentUserId);
+      if (otherMember?.user_id) {
+        setDirectBeneficiary(otherMember.user_id);
+      }
+    }
+  }, [splitMode, directBeneficiary, currentUserId, activeMembers]);
 
   const save = async () => {
     try {
