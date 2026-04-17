@@ -354,8 +354,9 @@ drop policy if exists "select invite by token" on public.invites;
 create policy "select invite by token" on public.invites for select using (true);
 
 drop policy if exists "insert invite admin" on public.invites;
-create policy "insert invite admin" on public.invites for insert with check (
-  exists (select 1 from public.memberships m where m.group_id = invites.group_id and m.user_id = auth.uid() and m.role in ('owner','admin'))
+drop policy if exists "insert invite member" on public.invites;
+create policy "insert invite member" on public.invites for insert with check (
+  exists (select 1 from public.memberships m where m.group_id = invites.group_id and m.user_id = auth.uid())
 );
 
 drop policy if exists "update invite admin" on public.invites;
@@ -494,7 +495,8 @@ security definer
 as $$
 declare v_token uuid;
 begin
-  if not exists (select 1 from public.memberships where group_id = p_group_id and user_id = auth.uid() and role in ('owner','admin')) then
+  -- Any group member can generate an invite link
+  if not exists (select 1 from public.memberships where group_id = p_group_id and user_id = auth.uid()) then
     raise exception 'not authorized';
   end if;
   insert into public.invites (group_id, invited_role, inviter)
@@ -503,6 +505,7 @@ begin
   return v_token;
 end;
 $$;
+grant execute on function public.create_invite(uuid, text) to authenticated;
 
 create or replace function public.accept_invite(p_token uuid)
 returns void

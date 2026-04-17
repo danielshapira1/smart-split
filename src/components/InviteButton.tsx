@@ -3,20 +3,37 @@ import { createInvite } from "../lib/supaRest";
 
 type Props = {
   groupId: string;
-  isAdmin?: boolean; // owner/admin בלבד יתנו תוקן
+  isAdmin?: boolean; // kept for prop compatibility — no longer enforced here
 };
 
-export function InviteButton({ groupId, isAdmin }: Props) {
+async function copyToClipboard(text: string): Promise<void> {
+  // Modern Clipboard API
+  if (navigator?.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fall through to legacy
+    }
+  }
+  // Legacy fallback (works on most mobile browsers)
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "");
+  el.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand("copy");
+  document.body.removeChild(el);
+}
+
+export function InviteButton({ groupId }: Props) {
   const onInvite = async () => {
     try {
-      if (!isAdmin) {
-        alert("רק מנהל/בעלים יכול ליצור הזמנה");
-        return;
-      }
       const token = await createInvite(groupId, "member");
       const base = import.meta.env.BASE_URL || "/";
       const link = `${window.location.origin}${base}?invite=${token}`;
-      await navigator.clipboard.writeText(link);
+      await copyToClipboard(link);
       alert("קישור הזמנה הועתק ללוח:\n" + link);
     } catch (e: any) {
       alert(e?.message ?? "Invite failed");
